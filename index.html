@@ -183,6 +183,48 @@ function clearAim(){
 map.on("click",e=>setAim(e.latlng));
 $("clear").onclick=clearAim;
 
+// Elevation: from a terrain model (about 25 m resolution), so it is good for slope trends, not exact heights
+const ELEV=1.0;            // yards of extra (or less) distance per metre of height difference
+const elevCache=new Map();
+let elevTimer=null,elevBusy=false,elevRetryAt=0,lastMeElev=null;
+const ekey=p=>p.lat.toFixed(4)+","+p.lng.toFixed(4);
+function elevAt(p){
+  const v=elevCache.get(ekey(p));
+  if(p===me){if(v!==undefined){lastMeElev=v;return v}return lastMeElev}  // keep last value while a new one loads
+  return v===undefined?null:v;
+}
+async function getElevs(ps){
+  try{
+    const loc=ps.map(p=>p.lat.toFixed(5)+","+p.lng.toFixed(5)).join("|");
+    const r=await fetch("https://api.opentopodata.org/v1/eudem25m?locations="+loc);
+    const j=await r.json();
+    const v=j.results.map(x=>x.elevation);
+    if(j.status!=="OK"||v.some(x=>typeof x!=="number"))throw new Error("bad data");
+    return v;
+  }catch(e){
+    const la=ps.map(p=>p.lat.toFixed(5)).join(","),lo=ps.map(p=>p.lng.toFixed(5)).join(",");
+    const r=await fetch(`https://api.open-meteo.com/v1/elevation?latitude=${la}&longitude=${lo}`);
+    const j=await r.json();
+    if(!Array.isArray(j.elevation))throw new Error("no elevation");
+    return j.elevation;
+  }
+}
+function queueElev(){if(elevTimer||Date.now()<elevRetryAt)return;elevTimer=setTimeout(fetchElev,600)}
+async function fetchElev(){
+  elevTimer=null;
+  if(elevBusy||!me)return;
+  elevBusy=true;
+  const g=currentGreen();
+  const miss=[],seen=new Set();
+  for(const p of [me,aim,g&&g.c]){if(!p)continue;const k=ekey(p);if(!elevCache.has(k)&&!seen.has(k)){seen.add(k);miss.push([k,p])}}
+  if(miss.length){
+    try{const v=await getElevs(miss.map(m=>m[1]));miss.forEach((m,i)=>elevCache.set(m[0],v[i]))}
+    catch(e){elevRetryAt=Date.now()+30000}   // back off for 30 s, plays then ignores height
+  }
+  elevBusy=false;
+  update();
+}
+
 function plays(pt){
   const d=dist(me,pt),b=bearing(me,pt);
   let adj=d,notes=[];
@@ -192,6 +234,11 @@ function plays(pt){
     adj*=1+(15-wx.t)*0.002;
     const side=Math.abs(wx.w*Math.sin(rad(wx.d-b)));
     notes.push(`${Math.round(wx.t)}°C, wind ${Math.round(wx.w)} mph (${head>=0?Math.round(head)+" into":Math.round(-head)+" behind"}, ${Math.round(side)} across)`);
+  }
+  const em=elevAt(me),et=elevAt(pt);
+  if(em!==null&&et!==null){
+    const dh=et-em;
+    if(Math.abs(dh)>=1){adj+=dh*ELEV;notes.unshift(`${dh>0?"Uphill":"Downhill"} ${Math.round(Math.abs(dh))} m (${dh>0?"+":"−"}${Math.round(Math.abs(dh)*ELEV)} yd)`)}
   }
   return {d,adj,notes};
 }
@@ -225,6 +272,7 @@ function update(){
     $("meta").textContent=note||"Tap the map to set an aim point.";$("alt").textContent="";
     return;
   }
+  if([me,tgt].some(q=>!elevCache.has(ekey(q))))queueElev();
   const p=plays(tgt);
   let range="";
   if(g){
