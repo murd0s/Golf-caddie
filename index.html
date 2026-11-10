@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Club">
+<title>Club</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#14281d;--chalk:#f2f4ef;--flag:#d8432f;--sand:#c9b27c;--line:#cfd6c9}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{font-family:Archivo,system-ui,sans-serif;background:var(--chalk);color:var(--ink);display:flex;flex-direction:column;padding-top:env(safe-area-inset-top)}
+#map{flex:1;min-height:0}
+#sheet{background:var(--chalk);border-top:3px solid var(--ink);padding:12px 16px calc(12px + env(safe-area-inset-bottom));max-height:52%;overflow:auto}
+.big{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+.club{font-size:44px;font-weight:800;line-height:1}
+.plays{font-size:18px;font-weight:600}
+.meta{font-size:14px;margin:6px 0;opacity:.85}
+.alt{font-size:14px;margin-top:4px}
+.row{display:flex;gap:8px;margin-top:10px}
+button{font:inherit;font-weight:600;padding:10px 14px;border:2px solid var(--ink);background:var(--chalk);color:var(--ink);border-radius:6px}
+button.p{background:var(--ink);color:var(--chalk)}
+#bag{display:none}
+.bagrow{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);padding:6px 0}
+.bagrow input{width:80px;font:inherit;padding:6px;border:1px solid var(--ink);border-radius:4px;text-align:right}
+label.s{display:flex;justify-content:space-between;align-items:center;padding:6px 0}
+.pin{background:var(--flag);border:2px solid #fff;border-radius:50%}
+.me{background:#1d6fe8;border:3px solid #fff;border-radius:50%;box-shadow:0 0 0 2px #1d6fe8}
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="sheet">
+  <div id="play">
+    <div class="big"><span class="club" id="club">–</span><span class="plays" id="plays">Waiting for GPS</span></div>
+    <div class="meta" id="meta">Allow location when Safari asks.</div>
+    <div class="alt" id="alt"></div>
+    <div class="row"><button class="p" id="find">Find green</button><button id="bagBtn">Bag and settings</button></div>
+  </div>
+  <div id="bag">
+    <div class="row" style="margin:0 0 8px"><button class="p" id="back">Done</button></div>
+    <label class="s">Range ball boost (%)<input type="number" id="boost" step="0.5" style="width:80px;font:inherit;padding:6px;border:1px solid #14281d;border-radius:4px;text-align:right"></label>
+    <div class="meta">Carry yards at the range, per club. Real balls go further by the boost above.</div>
+    <div id="clubs"></div>
+  </div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+const DEFAULT_BAG={"Driver":230,"3 wood":210,"5 wood":195,"4 iron":180,"5 iron":170,"6 iron":160,"7 iron":150,"8 iron":140,"9 iron":130,"PW":118,"GW":105,"SW":90,"LW":70};
+let S;
+try{S=JSON.parse(localStorage.getItem("club-v1"))}catch(e){}
+if(!S)S={bag:DEFAULT_BAG,boost:4};
+const save=()=>{try{localStorage.setItem("club-v1",JSON.stringify(S))}catch(e){}};
+const $=id=>document.getElementById(id);
+const YD=1.09361, R=6371000, rad=d=>d*Math.PI/180;
+
+// Map
+const map=L.map("map",{zoomControl:false,maxZoom:20}).setView([53.2465,-2.5755],16);
+L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",{maxZoom:20,maxNativeZoom:19,attribution:"Esri"}).addTo(map);
+const overlay=L.layerGroup().addTo(map);
+let me=null,meMarker=null,target=null,targetMarker=null,line=null,wx=null,greens=[];
+
+function dist(a,b){const dp=rad(b.lat-a.lat),dl=rad(b.lng-a.lng);const x=Math.sin(dp/2)**2+Math.cos(rad(a.lat))*Math.cos(rad(b.lat))*Math.sin(dl/2)**2;return 2*R*Math.asin(Math.sqrt(x))*YD}
+function bearing(a,b){const y=Math.sin(rad(b.lng-a.lng))*Math.cos(rad(b.lat));const x=Math.cos(rad(a.lat))*Math.sin(rad(b.lat))-Math.sin(rad(a.lat))*Math.cos(rad(b.lat))*Math.cos(rad(b.lng-a.lng));return (Math.atan2(y,x)*180/Math.PI+360)%360}
+
+// GPS
+navigator.geolocation.watchPosition(p=>{
+  const first=!me;
+  me={lat:p.coords.latitude,lng:p.coords.longitude};
+  if(!meMarker)meMarker=L.marker(me,{icon:L.divIcon({className:"",html:'<div class="me" style="width:16px;height:16px"></div>',iconSize:[16,16],iconAnchor:[8,8]})}).addTo(map);
+  else meMarker.setLatLng(me);
+  if(first){map.setView(me,18);loadWeather();findGreen()}
+  update();
+},e=>{$("meta").textContent="No GPS: "+e.message+". Check Safari location permission for this site."},{enableHighAccuracy:true,maximumAge:2000});
+
+async function loadWeather(){
+  if(!me)return;
+  try{
+    const r=await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${me.lat}&longitude=${me.lng}&current=temperature_2m,wind_speed_10m,wind_direction_10m&wind_speed_unit=mph`);
+    const j=await r.json();wx={t:j.current.temperature_2m,w:j.current.wind_speed_10m,d:j.current.wind_direction_10m};
+    update();
+  }catch(e){$("meta").textContent="Weather unavailable, using still air at 15°C."}
+}
+setInterval(loadWeather,600000);
+
+// Course data from OpenStreetMap
+async function findGreen(){
+  if(!me)return;
+  $("find").textContent="Searching…";
+  const q=`[out:json][timeout:20];(way["golf"="green"](around:400,${me.lat},${me.lng});way["golf"="bunker"](around:400,${me.lat},${me.lng});way["golf"="water_hazard"](around:400,${me.lat},${me.lng}););out geom;`;
+  try{
+    const r=await fetch("https://overpass-api.de/api/interpreter",{method:"POST",body:"data="+encodeURIComponent(q)});
+    const j=await r.json();
+    overlay.clearLayers();greens=[];
+    for(const w of j.elements){
+      if(!w.geometry)continue;
+      const pts=w.geometry.map(g=>({lat:g.lat,lng:g.lon}));
+      const kind=w.tags.golf;
+      L.polygon(pts,{color:kind==="green"?"#7dff9a":kind==="bunker"?"#c9b27c":"#4aa3ff",weight:2,fillOpacity:.15,interactive:false}).addTo(overlay);
+      if(kind==="green"){
+        const c={lat:pts.reduce((s,p)=>s+p.lat,0)/pts.length,lng:pts.reduce((s,p)=>s+p.lng,0)/pts.length};
+        greens.push({c,pts});
+      }
+    }
+    if(greens.length){
+      greens.sort((a,b)=>dist(me,a.c)-dist(me,b.c));
+      setTarget(greens[0].c,true);
+    }else $("meta").textContent="No greens found nearby. Tap the map to set a target.";
+  }catch(e){$("meta").textContent="Course data failed to load. Tap the map to set a target."}
+  $("find").textContent="Find green";
+}
+$("find").onclick=findGreen;
+
+function setTarget(ll,isGreen){
+  target={lat:ll.lat,lng:ll.lng,green:isGreen?greens[0]:null};
+  if(!targetMarker)targetMarker=L.marker(target,{icon:L.divIcon({className:"",html:'<div class="pin" style="width:16px;height:16px"></div>',iconSize:[16,16],iconAnchor:[8,8]})}).addTo(map);
+  else targetMarker.setLatLng(target);
+  update();
+}
+map.on("click",e=>setTarget(e.latlng,false));
+
+// Plays-like distance and club choice
+function update(){
+  if(!me||!target)return;
+  if(line)map.removeLayer(line);
+  line=L.polyline([me,target],{color:"#fff",weight:2,dashArray:"6 6"}).addTo(map);
+  const d=dist(me,target), b=bearing(me,target);
+  let adj=d, notes=[];
+  if(wx){
+    const head=wx.w*Math.cos(rad(wx.d-b)); // wind FROM direction aligned with target = headwind
+    adj*=1+(head>0?head*0.01:head*0.005);
+    adj*=1+(15-wx.t)*0.002;
+    const side=Math.abs(wx.w*Math.sin(rad(wx.d-b)));
+    notes.push(`${Math.round(wx.t)}°C, wind ${Math.round(wx.w)} mph (${head>=0?Math.round(head)+" into":Math.round(-head)+" behind"}, ${Math.round(side)} across)`);
+  }
+  let range="";
+  if(target.green){
+    const ds=target.green.pts.map(p=>dist(me,p));
+    range=`front ${Math.round(Math.min(...ds))} · centre ${Math.round(d)} · back ${Math.round(Math.max(...ds))}`;
+  }
+  const clubs=Object.entries(S.bag).map(([n,c])=>[n,c*(1+S.boost/100)]).sort((a,b)=>b[1]-a[1]);
+  let best=clubs[0];
+  for(const c of clubs)if(Math.abs(c[1]-adj)<Math.abs(best[1]-adj))best=c;
+  const i=clubs.indexOf(best);
+  $("club").textContent=best[0];
+  $("plays").textContent=`plays ${Math.round(adj)} yd (${Math.round(d)} real)`;
+  $("meta").textContent=[range,...notes].filter(Boolean).join(" · ");
+  const up=clubs[i-1],dn=clubs[i+1];
+  $("alt").textContent=`Carry ${Math.round(best[1])}`+(up?` · longer: ${up[0]} ${Math.round(up[1])}`:"")+(dn?` · shorter: ${dn[0]} ${Math.round(dn[1])}`:"");
+}
+
+// Bag editor
+function drawBag(){
+  $("boost").value=S.boost;
+  $("clubs").innerHTML="";
+  for(const [n,c] of Object.entries(S.bag)){
+    const r=document.createElement("div");r.className="bagrow";
+    r.innerHTML=`<span>${n}</span><input type="number" inputmode="numeric" value="${c}">`;
+    r.querySelector("input").onchange=e=>{S.bag[n]=+e.target.value||0;save();update()};
+    $("clubs").appendChild(r);
+  }
+}
+$("boost").onchange=e=>{S.boost=+e.target.value||0;save();update()};
+$("bagBtn").onclick=()=>{drawBag();$("play").style.display="none";$("bag").style.display="block"};
+$("back").onclick=()=>{$("bag").style.display="none";$("play").style.display="block";map.invalidateSize()};
+</script>
+</body>
+</html>
