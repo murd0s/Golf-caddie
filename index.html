@@ -20,13 +20,18 @@ body{font-family:Archivo,system-ui,sans-serif;background:var(--chalk);color:var(
 .plays{font-size:18px;font-weight:600}
 .meta{font-size:14px;margin:6px 0;opacity:.85}
 .alt{font-size:14px;margin-top:4px}
-.row{display:flex;gap:8px;margin-top:10px}
+.row{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
 button{font:inherit;font-weight:600;padding:10px 14px;border:2px solid var(--ink);background:var(--chalk);color:var(--ink);border-radius:6px}
 button.p{background:var(--ink);color:var(--chalk)}
 #bag{display:none}
 .bagrow{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);padding:6px 0}
 .bagrow input{width:80px;font:inherit;padding:6px;border:1px solid var(--ink);border-radius:4px;text-align:right}
 label.s{display:flex;justify-content:space-between;align-items:center;padding:6px 0}
+.holerow{display:flex;gap:8px;margin-bottom:8px}
+#hl{flex:1;padding:6px 10px}
+#hp,#hn{padding:6px 14px}
+.tag{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;opacity:.7;margin-bottom:2px;min-height:14px}
+.aim{background:#ffd23f;border:2px solid #fff;border-radius:50%}
 .pin{background:var(--flag);border:2px solid #fff;border-radius:50%}
 .me{background:#1d6fe8;border:3px solid #fff;border-radius:50%;box-shadow:0 0 0 2px #1d6fe8}
 </style>
@@ -35,10 +40,12 @@ label.s{display:flex;justify-content:space-between;align-items:center;padding:6p
 <div id="map"></div>
 <div id="sheet">
   <div id="play">
+    <div class="holerow"><button id="hp">‹</button><button id="hl">No hole data</button><button id="hn">›</button></div>
+    <div class="tag" id="tag"></div>
     <div class="big"><span class="club" id="club">–</span><span class="plays" id="plays">Waiting for GPS</span></div>
     <div class="meta" id="meta">Allow location when Safari asks.</div>
     <div class="alt" id="alt"></div>
-    <div class="row"><button class="p" id="find">Find green</button><button id="bagBtn">Bag and settings</button></div>
+    <div class="row"><button class="p" id="find">Find hole</button><button id="clear">Clear aim</button><button id="bagBtn">Bag and settings</button></div>
   </div>
   <div id="bag">
     <div class="row" style="margin:0 0 8px"><button class="p" id="back">Done</button></div>
@@ -60,11 +67,17 @@ const YD=1.09361, R=6371000, rad=d=>d*Math.PI/180;
 // Map
 const map=L.map("map",{zoomControl:false,maxZoom:20}).setView([53.2465,-2.5755],16);
 L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",{maxZoom:20,maxNativeZoom:19,attribution:"Esri"}).addTo(map);
-const overlay=L.layerGroup().addTo(map);
-let me=null,meMarker=null,target=null,targetMarker=null,line=null,wx=null,greens=[];
+const overlay=L.layerGroup().addTo(map), holeLayer=L.layerGroup().addTo(map);
+let me=null,meMarker=null,aim=null,aimMarker=null,greenMarker=null,greenLine=null,aimLine=null,wx=null;
+let holes=[],greens=[],fetchedAt=null,fetching=false,cur=null,manual=false,note="";
 
 function dist(a,b){const dp=rad(b.lat-a.lat),dl=rad(b.lng-a.lng);const x=Math.sin(dp/2)**2+Math.cos(rad(a.lat))*Math.cos(rad(b.lat))*Math.sin(dl/2)**2;return 2*R*Math.asin(Math.sqrt(x))*YD}
 function bearing(a,b){const y=Math.sin(rad(b.lng-a.lng))*Math.cos(rad(b.lat));const x=Math.cos(rad(a.lat))*Math.sin(rad(b.lat))-Math.sin(rad(a.lat))*Math.cos(rad(b.lat))*Math.cos(rad(b.lng-a.lng));return (Math.atan2(y,x)*180/Math.PI+360)%360}
+
+// Distance in metres from point p to a hole line (tee to green)
+function toXY(q,o){return {x:rad(q.lng-o.lng)*Math.cos(rad(o.lat))*R,y:rad(q.lat-o.lat)*R}}
+function segDist(a,b){const dx=b.x-a.x,dy=b.y-a.y,l=dx*dx+dy*dy;let t=l?(-a.x*dx-a.y*dy)/l:0;t=Math.max(0,Math.min(1,t));return Math.hypot(a.x+t*dx,a.y+t*dy)}
+function holeDist(h,p){const xy=h.pts.map(q=>toXY(q,p));if(xy.length<2)return Math.hypot(xy[0].x,xy[0].y);let m=1e9;for(let i=0;i<xy.length-1;i++)m=Math.min(m,segDist(xy[i],xy[i+1]));return m}
 
 // GPS
 navigator.geolocation.watchPosition(p=>{
@@ -72,7 +85,8 @@ navigator.geolocation.watchPosition(p=>{
   me={lat:p.coords.latitude,lng:p.coords.longitude};
   if(!meMarker)meMarker=L.marker(me,{icon:L.divIcon({className:"",html:'<div class="me" style="width:16px;height:16px"></div>',iconSize:[16,16],iconAnchor:[8,8]})}).addTo(map);
   else meMarker.setLatLng(me);
-  if(first){map.setView(me,18);loadWeather();findGreen()}
+  if(first){map.setView(me,18);loadWeather()}
+  if(first||(fetchedAt&&dist(me,fetchedAt)>600))loadCourse();
   update();
 },e=>{$("meta").textContent="No GPS: "+e.message+". Check Safari location permission for this site."},{enableHighAccuracy:true,maximumAge:2000});
 
@@ -86,49 +100,92 @@ async function loadWeather(){
 }
 setInterval(loadWeather,600000);
 
-// Course data from OpenStreetMap
-async function findGreen(){
-  if(!me)return;
-  $("find").textContent="Searching…";
-  const q=`[out:json][timeout:20];(way["golf"="green"](around:400,${me.lat},${me.lng});way["golf"="bunker"](around:400,${me.lat},${me.lng});way["golf"="water_hazard"](around:400,${me.lat},${me.lng}););out geom;`;
+// Course data from OpenStreetMap: hole lines, greens, hazards
+async function loadCourse(){
+  if(!me||fetching)return;
+  fetching=true;$("find").textContent="Searching…";
+  const a=`(around:1500,${me.lat},${me.lng})`;
+  const q=`[out:json][timeout:25];way["golf"~"^(hole|green|bunker|water_hazard|lateral_water_hazard)$"]${a};out geom;`;
   try{
     const r=await fetch("https://overpass-api.de/api/interpreter",{method:"POST",body:"data="+encodeURIComponent(q)});
     const j=await r.json();
-    overlay.clearLayers();greens=[];
+    overlay.clearLayers();
+    const hs=[],gs=[];
     for(const w of j.elements){
       if(!w.geometry)continue;
       const pts=w.geometry.map(g=>({lat:g.lat,lng:g.lon}));
       const kind=w.tags.golf;
+      if(kind==="hole"){hs.push({ref:parseInt(w.tags.ref),par:w.tags.par,pts});continue}
       L.polygon(pts,{color:kind==="green"?"#7dff9a":kind==="bunker"?"#c9b27c":"#4aa3ff",weight:2,fillOpacity:.15,interactive:false}).addTo(overlay);
-      if(kind==="green"){
-        const c={lat:pts.reduce((s,p)=>s+p.lat,0)/pts.length,lng:pts.reduce((s,p)=>s+p.lng,0)/pts.length};
-        greens.push({c,pts});
-      }
+      if(kind==="green")gs.push({c:{lat:pts.reduce((s,p)=>s+p.lat,0)/pts.length,lng:pts.reduce((s,p)=>s+p.lng,0)/pts.length},pts});
     }
-    if(greens.length){
-      greens.sort((a,b)=>dist(me,a.c)-dist(me,b.c));
-      setTarget(greens[0].c,true);
-    }else $("meta").textContent="No greens found nearby. Tap the map to set a target.";
-  }catch(e){$("meta").textContent="Course data failed to load. Tap the map to set a target."}
-  $("find").textContent="Find green";
-}
-$("find").onclick=findGreen;
-
-function setTarget(ll,isGreen){
-  target={lat:ll.lat,lng:ll.lng,green:isGreen?greens[0]:null};
-  if(!targetMarker)targetMarker=L.marker(target,{icon:L.divIcon({className:"",html:'<div class="pin" style="width:16px;height:16px"></div>',iconSize:[16,16],iconAnchor:[8,8]})}).addTo(map);
-  else targetMarker.setLatLng(target);
+    greens=gs;
+    // one line per hole number (keep the longest), sorted 1..18
+    const byRef=new Map();
+    for(const h of hs){const k=isNaN(h.ref)?"x"+byRef.size:h.ref;const o=byRef.get(k);if(!o||h.pts.length>o.pts.length)byRef.set(k,h)}
+    holes=[...byRef.values()].sort((x,y)=>(isNaN(x.ref)?999:x.ref)-(isNaN(y.ref)?999:y.ref));
+    // the green for each hole is the one nearest the end of the line (lines run tee to green)
+    const near=pt=>{let b=null,bd=1e9;for(const g of greens){const d=dist(pt,g.c);if(d<bd){bd=d;b=g}}return bd<90?b:null};
+    for(const h of holes)h.green=near(h.pts[h.pts.length-1])||near(h.pts[0]);
+    fetchedAt={lat:me.lat,lng:me.lng};
+    cur=null;
+    note=(!holes.length&&!greens.length)?"No course data nearby. Tap the map to set an aim point.":!holes.length?"No hole lines mapped here, using the nearest green.":"";
+  }catch(e){note="Course data failed to load. Tap the map to set an aim point."}
+  fetching=false;$("find").textContent="Find hole";
   update();
 }
-map.on("click",e=>setTarget(e.latlng,false));
+$("find").onclick=()=>{manual=false;loadCourse()};
 
-// Plays-like distance and club choice
-function update(){
-  if(!me||!target)return;
-  if(line)map.removeLayer(line);
-  line=L.polyline([me,target],{color:"#fff",weight:2,dashArray:"6 6"}).addTo(map);
-  const d=dist(me,target), b=bearing(me,target);
-  let adj=d, notes=[];
+// Which hole am I on? Nearest hole line, with a little hysteresis so it doesn't flicker.
+function pickHole(){
+  if(manual||!me||!holes.length){if(!holes.length)cur=null;return}
+  let best=-1,bd=1e9;
+  holes.forEach((h,i)=>{const d=holeDist(h,me);if(d<bd){bd=d;best=i}});
+  if(bd>150){cur=null;return}               // not on a hole
+  if(cur===null||best===cur){cur=best;return}
+  if(holeDist(holes[cur],me)-bd>10)cur=best;
+}
+function nearestGreen(){
+  if(!me||!greens.length)return null;
+  let b=null,bd=1e9;for(const g of greens){const d=dist(me,g.c);if(d<bd){bd=d;b=g}}
+  return bd<437?b:null;                       // within 400 m
+}
+function currentGreen(){
+  if(cur!==null&&holes[cur])return holes[cur].green||nearestGreen();
+  return nearestGreen();
+}
+
+// Hole picker buttons
+function stepHole(n){
+  if(!holes.length)return;
+  manual=true;
+  cur=cur===null?(n>0?0:holes.length-1):(cur+n+holes.length)%holes.length;
+  update();
+}
+$("hp").onclick=()=>stepHole(-1);
+$("hn").onclick=()=>stepHole(1);
+$("hl").onclick=()=>{manual=false;update()};
+
+// Aim point: tap the map or drag the yellow marker
+function setAim(ll){
+  aim={lat:ll.lat,lng:ll.lng};
+  if(!aimMarker){
+    aimMarker=L.marker(aim,{draggable:true,icon:L.divIcon({className:"",html:'<div class="aim" style="width:18px;height:18px"></div>',iconSize:[18,18],iconAnchor:[9,9]})}).addTo(map);
+    aimMarker.on("drag",e=>{aim=e.target.getLatLng();update()});
+  }else aimMarker.setLatLng(aim);
+  update();
+}
+function clearAim(){
+  aim=null;
+  if(aimMarker){map.removeLayer(aimMarker);aimMarker=null}
+  update();
+}
+map.on("click",e=>setAim(e.latlng));
+$("clear").onclick=clearAim;
+
+function plays(pt){
+  const d=dist(me,pt),b=bearing(me,pt);
+  let adj=d,notes=[];
   if(wx){
     const head=wx.w*Math.cos(rad(wx.d-b)); // wind FROM direction aligned with target = headwind
     adj*=1+(head>0?head*0.01:head*0.005);
@@ -136,18 +193,52 @@ function update(){
     const side=Math.abs(wx.w*Math.sin(rad(wx.d-b)));
     notes.push(`${Math.round(wx.t)}°C, wind ${Math.round(wx.w)} mph (${head>=0?Math.round(head)+" into":Math.round(-head)+" behind"}, ${Math.round(side)} across)`);
   }
+  return {d,adj,notes};
+}
+
+function update(){
+  pickHole();
+  // hole label and hole line
+  holeLayer.clearLayers();
+  if(cur!==null&&holes[cur]){
+    const h=holes[cur];
+    $("hl").textContent=`Hole ${isNaN(h.ref)?"?":h.ref}${h.par?" · par "+h.par:""}${manual?" · tap for auto":""}`;
+    L.polyline(h.pts,{color:"#fff",weight:2,opacity:.55,interactive:false}).addTo(holeLayer);
+  }else $("hl").textContent=holes.length?"Not on a hole":"No hole data";
+  $("clear").disabled=!aim;$("clear").style.opacity=aim?1:.45;
+
+  const g=currentGreen();
+  // green pin and line
+  if(g){
+    if(!greenMarker)greenMarker=L.marker(g.c,{interactive:false,icon:L.divIcon({className:"",html:'<div class="pin" style="width:16px;height:16px"></div>',iconSize:[16,16],iconAnchor:[8,8]})}).addTo(map);
+    else greenMarker.setLatLng(g.c);
+  }else if(greenMarker){map.removeLayer(greenMarker);greenMarker=null}
+  if(greenLine){map.removeLayer(greenLine);greenLine=null}
+  if(aimLine){map.removeLayer(aimLine);aimLine=null}
+  if(!me)return;
+  if(g)greenLine=L.polyline([me,g.c],{color:"#fff",weight:2,dashArray:"6 6",interactive:false}).addTo(map);
+  if(aim)aimLine=L.polyline([me,aim],{color:"#ffd23f",weight:2,dashArray:"2 6",interactive:false}).addTo(map);
+
+  const tgt=aim||(g&&g.c);
+  if(!tgt){
+    $("tag").textContent="";$("club").textContent="–";$("plays").textContent="No target";
+    $("meta").textContent=note||"Tap the map to set an aim point.";$("alt").textContent="";
+    return;
+  }
+  const p=plays(tgt);
   let range="";
-  if(target.green){
-    const ds=target.green.pts.map(p=>dist(me,p));
-    range=`front ${Math.round(Math.min(...ds))} · centre ${Math.round(d)} · back ${Math.round(Math.max(...ds))}`;
+  if(g){
+    const ds=g.pts.map(q=>dist(me,q));
+    range=`Green: front ${Math.round(Math.min(...ds))} · centre ${Math.round(dist(me,g.c))} · back ${Math.round(Math.max(...ds))}`;
   }
   const clubs=Object.entries(S.bag).map(([n,c])=>[n,c*(1+S.boost/100)]).sort((a,b)=>b[1]-a[1]);
   let best=clubs[0];
-  for(const c of clubs)if(Math.abs(c[1]-adj)<Math.abs(best[1]-adj))best=c;
+  for(const c of clubs)if(Math.abs(c[1]-p.adj)<Math.abs(best[1]-p.adj))best=c;
   const i=clubs.indexOf(best);
+  $("tag").textContent=aim?"To aim point":"To green centre";
   $("club").textContent=best[0];
-  $("plays").textContent=`plays ${Math.round(adj)} yd (${Math.round(d)} real)`;
-  $("meta").textContent=[range,...notes].filter(Boolean).join(" · ");
+  $("plays").textContent=`plays ${Math.round(p.adj)} yd (${Math.round(p.d)} real)`;
+  $("meta").textContent=[range,...p.notes,note].filter(Boolean).join(" · ");
   const up=clubs[i-1],dn=clubs[i+1];
   $("alt").textContent=`Carry ${Math.round(best[1])}`+(up?` · longer: ${up[0]} ${Math.round(up[1])}`:"")+(dn?` · shorter: ${dn[0]} ${Math.round(dn[1])}`:"");
 }
