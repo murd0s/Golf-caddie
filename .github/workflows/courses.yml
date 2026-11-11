@@ -1,4 +1,4 @@
-name: Fetch courses Fast
+name: Fetch courses Faster
 
 on:
   workflow_dispatch:
