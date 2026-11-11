@@ -1,4 +1,4 @@
-name: Fetch courses
+name: Fetch courses v4
 
 on:
   workflow_dispatch:
