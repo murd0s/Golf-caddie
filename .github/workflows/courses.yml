@@ -44,7 +44,7 @@ jobs:
                       with urllib.request.urlopen(req, timeout=15) as r:
                           return json.load(r)
                   except Exception as e:
-                      print("  server failed:", s, e)
+                      print("  server failed:", s, e, flush=True)
                       time.sleep(1)
               raise RuntimeError("All map servers failed")
 
@@ -60,7 +60,7 @@ jobs:
 
           index = []
           for name, lat, lon in COURSES:
-              print("==", name)
+              print("==", name, flush=True)
               try:
                   around = f"(around:{RADIUS},{lat},{lon})"
                   parts = "".join(f'way["golf"="{t}"]{around};' for t in ("hole", "green", "bunker", "water_hazard", "lateral_water_hazard"))
