@@ -29,10 +29,11 @@ jobs:
           ]
           BBOX = "52.9,-3.4,53.8,-1.9"
           RADIUS = 1500
+          # Moved faster servers to the top
           SERVERS = [
-              "https://overpass-api.de/api/interpreter",
-              "https://overpass.kumi.systems/api/interpreter",
               "https://overpass.private.coffee/api/interpreter",
+              "https://overpass.kumi.systems/api/interpreter",
+              "https://overpass-api.de/api/interpreter",
               "https://overpass.openstreetmap.fr/api/interpreter",
           ]
           UA = "golf-caddie-course-fetch/1.0 (GitHub Actions)"
@@ -42,13 +43,14 @@ jobs:
                   for s in SERVERS:
                       try:
                           req = urllib.request.Request(s, data=urllib.parse.urlencode({"data": q}).encode(), headers={"User-Agent": UA})
-                          with urllib.request.urlopen(req, timeout=120) as r:
+                          # Reduced timeout from 120 to 30 seconds so it fails fast
+                          with urllib.request.urlopen(req, timeout=30) as r:
                               return json.load(r)
                       except Exception as e:
                           last = e
                           print("  server failed:", s, e)
-                          time.sleep(3)
-                  time.sleep(15)
+                          time.sleep(2)
+                  time.sleep(5)
               raise RuntimeError(last)
           def slug(n):
               return re.sub(r"[^a-z0-9]+", "-", n.lower()).strip("-")
@@ -62,7 +64,7 @@ jobs:
           for name, match in COURSES:
               print("==", name)
               try:
-                  q = f'[out:json][timeout:60];nwr["leisure"="golf_course"]["name"~"{match}",i]({BBOX});out center tags;'
+                  q = f'[out:json][timeout:25];nwr["leisure"="golf_course"]["name"~"{match}",i]({BBOX});out center tags;'
                   found = [e for e in overpass(q).get("elements", []) if e.get("center") or "lat" in e]
                   if not found:
                       print("  not found in OpenStreetMap")
@@ -71,7 +73,7 @@ jobs:
                   lat, lon = c["lat"], c["lon"]
                   around = f"(around:{RADIUS},{lat},{lon})"
                   parts = "".join(f'way["golf"="{t}"]{around};' for t in ("hole", "green", "bunker", "water_hazard", "lateral_water_hazard"))
-                  data = overpass(f"[out:json][timeout:60];({parts});out geom;")
+                  data = overpass(f"[out:json][timeout:25];({parts});out geom;")
                   els = []
                   for w in data.get("elements", []):
                       g = [p for p in w.get("geometry", []) if p]
