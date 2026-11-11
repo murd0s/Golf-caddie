@@ -104,7 +104,7 @@ function updateWind(){
   $("wsub").textContent=`from ${COMP[Math.round(wx.d/45)%8]}`+(wx.g&&wx.g>wx.w+3?` · gusts ${Math.round(wx.g)}`:"");
 }
 let me=null,meMarker=null,aim=null,aimMarker=null,greenMarker=null,greenLine=null,aimLine=null,wx=null;
-let holes=[],greens=[],hazards=[],toast="",fetchedAt=null,fetching=false,cur=null,manual=false,note="";
+let nearestInfo=null,holes=[],greens=[],hazards=[],toast="",fetchedAt=null,fetching=false,cur=null,manual=false,note="";
 
 function dist(a,b){const dp=rad(b.lat-a.lat),dl=rad(b.lng-a.lng);const x=Math.sin(dp/2)**2+Math.cos(rad(a.lat))*Math.cos(rad(b.lat))*Math.sin(dl/2)**2;return 2*R*Math.asin(Math.sqrt(x))*YD}
 function bearing(a,b){const y=Math.sin(rad(b.lng-a.lng))*Math.cos(rad(b.lat));const x=Math.cos(rad(a.lat))*Math.sin(rad(b.lat))-Math.sin(rad(a.lat))*Math.cos(rad(b.lat))*Math.cos(rad(b.lng-a.lng));return (Math.atan2(y,x)*180/Math.PI+360)%360}
@@ -122,7 +122,7 @@ function setMe(lat,lng){
   if(!meMarker){
     meMarker=L.marker(me,{draggable:true,icon:L.divIcon({className:"",html:'<div class="me" style="width:16px;height:16px"></div>',iconSize:[16,16],iconAnchor:[8,8]})}).addTo(map);
     meMarker.on("drag",e=>{if(!sim)return;const q=e.target.getLatLng();me={lat:q.lat,lng:q.lng};update()});
-    meMarker.on("dragend",()=>{if(sim&&fetchedAt&&dist(me,fetchedAt)>600){loadCourse();loadWeather()}});
+    meMarker.on("dragend",()=>{if(sim&&(!fetchedAt||dist(me,fetchedAt)>600)){loadCourse();loadWeather()}});
     if(!sim)meMarker.dragging.disable();
   }else meMarker.setLatLng(me);
   if(first&&!sim){map.setView(me,18);loadWeather()}
@@ -137,8 +137,10 @@ navigator.geolocation.watchPosition(p=>{
 function startSim(ll){
   sim=true;
   if(aimMarker){map.removeLayer(aimMarker);aimMarker=null}aim=null;
-  lastMeElev=null;manual=false;cur=null;
+  lastMeElev=null;manual=false;cur=null;nearestInfo=null;
+  const had=!!me;fetchedAt=null;
   setMe(ll.lat,ll.lng);
+  if(had)loadCourse();
   meMarker.dragging.enable();
   map.setView(me,Math.max(map.getZoom(),18));
   loadWeather();
@@ -204,22 +206,31 @@ function applyCourse(els){
   cur=null;
   note=(!holes.length&&!greens.length)?"No course data nearby. Tap the map to set an aim point.":!holes.length?"No hole lines mapped here, using the nearest green.":"";
 }
+let refetch=false;
 async function loadCourse(){
-  if(!me||fetching)return;
+  if(!me)return;
+  if(fetching){refetch=true;return}
   fetching=true;$("find").textContent="Searching…";
-  const a=`(around:1500,${me.lat},${me.lng})`;
+  const at={lat:me.lat,lng:me.lng};
+  const a=`(around:1500,${at.lat},${at.lng})`;
   const q=`[out:json][timeout:25];way["golf"~"^(hole|green|bunker|water_hazard|lateral_water_hazard)$"]${a};out geom;`;
-  try{
-    const r=await fetch("https://overpass-api.de/api/interpreter",{method:"POST",body:"data="+encodeURIComponent(q)});
-    const j=await r.json();
+  let j=null;
+  for(const ep of ["https://overpass-api.de/api/interpreter","https://overpass.kumi.systems/api/interpreter"]){
+    try{const r=await fetch(ep,{method:"POST",body:"data="+encodeURIComponent(q)});j=await r.json();if(j&&j.elements)break;j=null}catch(e){j=null}
+  }
+  if(j&&j.elements){
     applyCourse(j.elements);
-    fetchedAt={lat:me.lat,lng:me.lng};
-    try{localStorage.setItem("course-v1",JSON.stringify({els:j.elements,at:fetchedAt}))}catch(e){}
-  }catch(e){
-    note=(holes.length||greens.length)?"Offline: using saved course data.":"Course data failed to load. Tap the map to set an aim point.";
+    fetchedAt=at;
+    try{localStorage.setItem("course-v1",JSON.stringify({els:j.elements,at}))}catch(e){}
+  }else{
+    // never keep course data from somewhere else: that gives a false "Not on a hole"
+    const stale=!fetchedAt||dist(me,fetchedAt)>800;
+    if(stale||(!holes.length&&!greens.length)){holes=[];greens=[];hazards=[];overlay.clearLayers();cur=null;note="Course data failed to load (server busy?). Press Find hole to retry."}
+    else note="Offline: using saved course data.";
   }
   fetching=false;$("find").textContent="Find hole";
   update();
+  if(refetch){refetch=false;loadCourse()}
 }
 try{const c=JSON.parse(localStorage.getItem("course-v1"));if(c&&c.els){applyCourse(c.els);fetchedAt=c.at;note=""}}catch(e){}
 $("find").onclick=()=>{manual=false;loadCourse()};
@@ -229,7 +240,8 @@ function pickHole(){
   if(manual||!me||!holes.length){if(!holes.length)cur=null;return}
   let best=-1,bd=1e9;
   holes.forEach((h,i)=>{const d=holeDist(h,me);if(d<bd){bd=d;best=i}});
-  if(bd>150){cur=null;return}               // not on a hole
+  if(bd>150){cur=null;nearestInfo={ref:holes[best].ref,yd:Math.round(bd*YD)};return}               // not on a hole
+  nearestInfo=null;
   if(cur===null||best===cur){cur=best;return}
   if(holeDist(holes[cur],me)-bd>10)cur=best;
 }
@@ -340,7 +352,7 @@ function update(){
     const h=holes[cur];
     $("hl").textContent=`Hole ${isNaN(h.ref)?"?":h.ref}${h.par?" · par "+h.par:""}${manual?" · tap for auto":""}`;
     L.polyline(h.pts,{color:"#fff",weight:2,opacity:.55,interactive:false}).addTo(holeLayer);
-  }else $("hl").textContent=holes.length?"Not on a hole":"No hole data";
+  }else $("hl").textContent=holes.length?"Not on a hole"+(nearestInfo?` · nearest: ${isNaN(nearestInfo.ref)?"a hole":"hole "+nearestInfo.ref}, ${nearestInfo.yd} yd away`:""):"No hole data";
   $("simbar").style.display=sim?"":"none";
   $("clear").disabled=!aim;$("clear").style.opacity=aim?1:.45;
 
