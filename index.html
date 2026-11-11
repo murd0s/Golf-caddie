@@ -211,7 +211,7 @@ function applyCourse(els){
   note=(!holes.length&&!greens.length)?"No course data nearby. Tap the map to set an aim point.":!holes.length?"No hole lines mapped here, using the nearest green.":"";
 }
 let refetch=false;
-const OVERPASS=["https://overpass-api.de/api/interpreter","https://overpass.kumi.systems/api/interpreter","https://overpass.private.coffee/api/interpreter"];
+const OVERPASS=["https://overpass-api.de/api/interpreter","https://overpass.kumi.systems/api/interpreter","https://overpass.private.coffee/api/interpreter","https://overpass.openstreetmap.fr/api/interpreter","https://maps.mail.ru/osm/tools/overpass/api/interpreter"];
 async function loadCourse(){
   if(!me)return;
   if(fetching){refetch=true;return}
@@ -219,12 +219,12 @@ async function loadCourse(){
   const at={lat:me.lat,lng:me.lng};
   const a=`(around:1000,${at.lat},${at.lng})`;
   // exact tag matches are much faster on Overpass than a regex over every golf way in the world
-  const q=`[out:json][timeout:20];(${["hole","green","bunker","water_hazard","lateral_water_hazard"].map(t=>`way["golf"="${t}"]${a};`).join("")});out geom;`;
+  const q=`[out:json][timeout:15];(${["hole","green","bunker","water_hazard","lateral_water_hazard"].map(t=>`way["golf"="${t}"]${a};`).join("")});out geom;`;
   let j=null,whys=[];
   try{
     for(let k=0;k<OVERPASS.length&&!j;k++){
       note=`Loading course… (server ${k+1} of ${OVERPASS.length}${whys.length?"; earlier: "+whys.join(", "):""})`;update();
-      const ac=new AbortController(),tm=setTimeout(()=>ac.abort(),20000);
+      const ac=new AbortController(),tm=setTimeout(()=>ac.abort(),15000);
       try{
         const r=await fetch(OVERPASS[k],{method:"POST",body:"data="+encodeURIComponent(q),signal:ac.signal});
         if(!r.ok)throw new Error("HTTP "+r.status);
