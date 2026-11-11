@@ -18,86 +18,97 @@ jobs:
           python3 - <<'PY'
           import json, os, re, sys, time, urllib.parse, urllib.request
           COURSES = [
-              ("Vale Royal Abbey", "Vale Royal"),
-              ("Delamere Forest", "Delamere Forest"),
-              ("Sandiway", "Sandiway"),
-              ("Frodsham", "Frodsham"),
-              ("Runcorn", "Runcorn"),
-              ("Widnes", "Widnes"),
-              ("Northwich", "Northwich"),
-              ("Portal", "Portal"),
+              ("Vale Royal Abbey", "Vale Royal Abbey Golf Club"),
+              ("Delamere Forest", "Delamere Forest Golf Club"),
+              ("Sandiway", "Sandiway Golf Club"),
+              ("Frodsham", "Frodsham Golf Club"),
+              ("Runcorn", "Runcorn Golf Club"),
+              ("Widnes", "Widnes Golf Club"),
+              ("Northwich", "Northwich Golf Club"),
+              ("Portal", "Portal Golf Club"),
           ]
-          BBOX = "52.9,-3.4,53.8,-1.9"
           RADIUS = 1500
-          # Moved faster servers to the top
           SERVERS = [
-              "https://overpass.private.coffee/api/interpreter",
               "https://overpass.kumi.systems/api/interpreter",
               "https://overpass-api.de/api/interpreter",
-              "https://overpass.openstreetmap.fr/api/interpreter",
+              "https://overpass.private.coffee/api/interpreter",
           ]
           UA = "golf-caddie-course-fetch/1.0 (GitHub Actions)"
+
+          def get_url(url, data=None):
+              headers = {"User-Agent": UA}
+              if data: headers["Content-Type"] = "application/x-www-form-urlencoded"
+              req = urllib.request.Request(url, data=data, headers=headers)
+              with urllib.request.urlopen(req, timeout=20) as r:
+                  return json.load(r)
+
           def overpass(q):
-              last = None
-              for rnd in range(3):
-                  for s in SERVERS:
-                      try:
-                          req = urllib.request.Request(s, data=urllib.parse.urlencode({"data": q}).encode(), headers={"User-Agent": UA})
-                          # Reduced timeout from 120 to 30 seconds so it fails fast
-                          with urllib.request.urlopen(req, timeout=30) as r:
-                              return json.load(r)
-                      except Exception as e:
-                          last = e
-                          print("  server failed:", s, e)
-                          time.sleep(2)
-                  time.sleep(5)
-              raise RuntimeError(last)
+              for s in SERVERS:
+                  try:
+                      return get_url(s, urllib.parse.urlencode({"data": q}).encode())
+                  except Exception as e:
+                      print("  server failed:", s, e)
+                      time.sleep(1)
+              raise RuntimeError("All map servers failed")
+
           def slug(n):
               return re.sub(r"[^a-z0-9]+", "-", n.lower()).strip("-")
+
           os.makedirs("courses", exist_ok=True)
           old = {}
           try:
               old = {c["name"]: c for c in json.load(open("courses/index.json"))}
           except Exception:
               pass
+
           index = []
-          for name, match in COURSES:
+          for name, search_name in COURSES:
               print("==", name)
               try:
-                  q = f'[out:json][timeout:25];nwr["leisure"="golf_course"]["name"~"{match}",i]({BBOX});out center tags;'
-                  found = [e for e in overpass(q).get("elements", []) if e.get("center") or "lat" in e]
-                  if not found:
-                      print("  not found in OpenStreetMap")
+                  # 1. Find the course using Nominatim (much faster)
+                  q = urllib.parse.urlencode({"q": search_name + ", UK", "format": "json", "limit": 1})
+                  res = get_url("https://nominatim.openstreetmap.org/search?" + q)
+                  if not res:
+                      print("  not found on map")
                       raise LookupError("not found")
-                  c = found[0].get("center") or {"lat": found[0]["lat"], "lon": found[0]["lon"]}
-                  lat, lon = c["lat"], c["lon"]
+                  
+                  lat, lon = float(res[0]["lat"]), float(res[0]["lon"])
+                  print(f"  Found at {lat}, {lon}")
+                  
+                  # 2. Get the geometry from Overpass
                   around = f"(around:{RADIUS},{lat},{lon})"
                   parts = "".join(f'way["golf"="{t}"]{around};' for t in ("hole", "green", "bunker", "water_hazard", "lateral_water_hazard"))
-                  data = overpass(f"[out:json][timeout:25];({parts});out geom;")
+                  data = overpass(f"[out:json][timeout:20];({parts});out geom;")
+                  
                   els = []
                   for w in data.get("elements", []):
                       g = [p for p in w.get("geometry", []) if p]
                       tags = w.get("tags", {})
-                      if len(g) < 2 or "golf" not in tags:
-                          continue
+                      if len(g) < 2 or "golf" not in tags: continue
                       els.append({
                           "tags": {k: tags[k] for k in ("golf", "ref", "par") if k in tags},
                           "geometry": [{"lat": round(p["lat"], 6), "lon": round(p["lon"], 6)} for p in g],
                       })
+                  
                   holes = sum(1 for e in els if e["tags"]["golf"] == "hole")
                   greens = sum(1 for e in els if e["tags"]["golf"] == "green")
                   print(f"  {len(els)} features, {holes} hole lines, {greens} greens")
+                  
                   fn = slug(name) + ".json"
                   with open("courses/" + fn, "w") as f:
                       json.dump({"name": name, "lat": lat, "lng": lon, "elements": els}, f, separators=(",", ":"))
                   index.append({"name": name, "lat": lat, "lng": lon, "file": fn})
+                  
+                  time.sleep(1) # Be polite to the server
               except Exception as e:
                   print("  skipped:", e)
                   if name in old and os.path.exists("courses/" + old[name]["file"]):
                       index.append(old[name])
+
           if not index:
-              print("No courses could be downloaded. Run it again later.")
+              print("No courses could be downloaded.")
               sys.exit(1)
+              
           with open("courses/index.json", "w") as f:
               json.dump(index, f, indent=1)
           print("Saved", len(index), "courses")
