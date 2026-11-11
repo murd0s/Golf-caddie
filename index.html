@@ -218,11 +218,12 @@ async function loadCourse(){
   fetching=true;$("find").textContent="Searching…";
   const at={lat:me.lat,lng:me.lng};
   const a=`(around:1000,${at.lat},${at.lng})`;
-  const q=`[out:json][timeout:20];way["golf"~"^(hole|green|bunker|water_hazard|lateral_water_hazard)$"]${a};out geom;`;
-  let j=null,why="";
+  // exact tag matches are much faster on Overpass than a regex over every golf way in the world
+  const q=`[out:json][timeout:20];(${["hole","green","bunker","water_hazard","lateral_water_hazard"].map(t=>`way["golf"="${t}"]${a};`).join("")});out geom;`;
+  let j=null,whys=[];
   try{
     for(let k=0;k<OVERPASS.length&&!j;k++){
-      note=`Loading course… (server ${k+1} of ${OVERPASS.length})`;update();
+      note=`Loading course… (server ${k+1} of ${OVERPASS.length}${whys.length?"; earlier: "+whys.join(", "):""})`;update();
       const ac=new AbortController(),tm=setTimeout(()=>ac.abort(),20000);
       try{
         const r=await fetch(OVERPASS[k],{method:"POST",body:"data="+encodeURIComponent(q),signal:ac.signal});
@@ -230,7 +231,7 @@ async function loadCourse(){
         const x=await r.json();
         if(!x||!Array.isArray(x.elements))throw new Error("bad reply");
         j=x;
-      }catch(e){why=e.name==="AbortError"?"timed out":e.message}
+      }catch(e){whys.push(e.name==="AbortError"?"timed out":e.message)}
       finally{clearTimeout(tm)}
     }
     if(j){
@@ -240,8 +241,8 @@ async function loadCourse(){
     }else{
       // never keep course data from somewhere else: that gives a false "Not on a hole"
       const stale=!fetchedAt||dist(me,fetchedAt)>800;
-      if(stale||(!holes.length&&!greens.length)){holes=[];greens=[];hazards=[];overlay.clearLayers();cur=null;note=`Course data failed to load (${why}). Press Find hole to retry.`}
-      else note=`Offline: using saved course data (${why}).`;
+      if(stale||(!holes.length&&!greens.length)){holes=[];greens=[];hazards=[];overlay.clearLayers();cur=null;note=`Course data failed to load (${whys.join(", ")}). Press Find hole to retry.`}
+      else note=`Offline: using saved course data (${whys.join(", ")}).`;
     }
   }catch(e){
     note="Course data error: "+(e&&e.message||e);
