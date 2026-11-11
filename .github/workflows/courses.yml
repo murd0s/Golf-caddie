@@ -1,9 +1,4 @@
-name: Fetch courses v2
-
-# Downloads course maps (holes, greens, bunkers, water) from OpenStreetMap and saves them
-# in the courses folder so the app can load them instantly instead of asking a busy server.
-# Run it from the Actions tab: Fetch courses > Run workflow. It also refreshes monthly.
-# To add a course, add a line to COURSES below: ("name shown in the app", "word(s) in its OpenStreetMap name").
+name: Fetch courses
 
 on:
   workflow_dispatch:
@@ -18,12 +13,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Download courses
         run: |
           python3 - <<'PY'
           import json, os, re, sys, time, urllib.parse, urllib.request
-
           COURSES = [
               ("Vale Royal Abbey", "Vale Royal"),
               ("Delamere Forest", "Delamere Forest"),
@@ -34,7 +27,7 @@ jobs:
               ("Northwich", "Northwich"),
               ("Portal", "Portal"),
           ]
-          BBOX = "52.9,-3.4,53.8,-1.9"   # south,west,north,east: Cheshire, Merseyside and around
+          BBOX = "52.9,-3.4,53.8,-1.9"
           RADIUS = 1500
           SERVERS = [
               "https://overpass-api.de/api/interpreter",
@@ -43,7 +36,6 @@ jobs:
               "https://overpass.openstreetmap.fr/api/interpreter",
           ]
           UA = "golf-caddie-course-fetch/1.0 (GitHub Actions)"
-
           def overpass(q):
               last = None
               for rnd in range(3):
@@ -58,17 +50,14 @@ jobs:
                           time.sleep(3)
                   time.sleep(15)
               raise RuntimeError(last)
-
           def slug(n):
               return re.sub(r"[^a-z0-9]+", "-", n.lower()).strip("-")
-
           os.makedirs("courses", exist_ok=True)
           old = {}
           try:
               old = {c["name"]: c for c in json.load(open("courses/index.json"))}
           except Exception:
               pass
-
           index = []
           for name, match in COURSES:
               print("==", name)
@@ -103,8 +92,7 @@ jobs:
               except Exception as e:
                   print("  skipped:", e)
                   if name in old and os.path.exists("courses/" + old[name]["file"]):
-                      index.append(old[name])   # keep the previous copy
-
+                      index.append(old[name])
           if not index:
               print("No courses could be downloaded. Run it again later.")
               sys.exit(1)
@@ -112,7 +100,6 @@ jobs:
               json.dump(index, f, indent=1)
           print("Saved", len(index), "courses")
           PY
-
       - name: Save to the repo
         run: |
           git config user.name "github-actions"
