@@ -14,7 +14,7 @@ jobs:
       - name: Download courses
         run: |
           python3 - <<'PY'
-          import json, os, re, time, urllib.parse, urllib.request
+          import json, os, re, sys, time, urllib.parse, urllib.request
 
           COURSES = [
               ("Vale Royal Abbey", 53.2333, -2.5167),
@@ -26,7 +26,7 @@ jobs:
               ("Northwich", 53.2667, -2.5000),
               ("Portal", 53.1833, -2.6167),
           ]
-          RADIUS = 1500
+          RADIUS = 2500
           SERVERS = [
               "https://overpass.kumi.systems/api/interpreter",
               "https://overpass-api.de/api/interpreter",
@@ -38,7 +38,7 @@ jobs:
               for s in SERVERS:
                   try:
                       req = urllib.request.Request(s, data=urllib.parse.urlencode({"data": q}).encode(), headers={"User-Agent": UA})
-                      with urllib.request.urlopen(req, timeout=15) as r:
+                      with urllib.request.urlopen(req, timeout=90) as r:
                           return json.load(r)
                   except Exception as e:
                       print("  server failed:", s, e, flush=True)
@@ -61,7 +61,7 @@ jobs:
               try:
                   around = f"(around:{RADIUS},{lat},{lon})"
                   parts = "".join(f'way["golf"="{t}"]{around};' for t in ("hole", "green", "bunker", "water_hazard", "lateral_water_hazard"))
-                  data = overpass(f"[out:json][timeout:15];({parts});out geom;")
+                  data = overpass(f"[out:json][timeout:60];({parts});out geom;")
                   
                   els = []
                   for w in data.get("elements", []):
@@ -101,4 +101,5 @@ jobs:
           git config user.email "actions@users.noreply.github.com"
           git add courses
           git commit -m "Update preloaded courses" || echo "No changes"
+          git pull --rebase || true
           git push
