@@ -1,0 +1,38 @@
+[
+ {
+  "name": "Delamere Forest",
+  "lat": 53.2333,
+  "lng": -2.6667,
+  "file": "delamere-forest.json"
+ },
+ {
+  "name": "Sandiway",
+  "lat": 53.25,
+  "lng": -2.5833,
+  "file": "sandiway.json"
+ },
+ {
+  "name": "Frodsham",
+  "lat": 53.2833,
+  "lng": -2.7167,
+  "file": "frodsham.json"
+ },
+ {
+  "name": "Widnes",
+  "lat": 53.3667,
+  "lng": -2.7333,
+  "file": "widnes.json"
+ },
+ {
+  "name": "Northwich",
+  "lat": 53.2667,
+  "lng": -2.5,
+  "file": "northwich.json"
+ },
+ {
+  "name": "Portal",
+  "lat": 53.1833,
+  "lng": -2.6167,
+  "file": "portal.json"
+ }
+]
