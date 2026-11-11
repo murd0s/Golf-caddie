@@ -5,11 +5,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Club">
+<meta name="color-scheme" content="light dark">
 <title>Club</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800&display=swap" rel="stylesheet">
 <style>
-:root{--ink:#14281d;--chalk:#f2f4ef;--flag:#d8432f;--sand:#c9b27c;--line:#cfd6c9}
+:root{--ink:#14281d;--chalk:#f2f4ef;--flag:#d8432f;--sand:#c9b27c;--line:#cfd6c9;color-scheme:light}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--ink:#e6eee8;--chalk:#17231c;--line:#33473b;color-scheme:dark}}
+:root[data-theme="dark"]{--ink:#e6eee8;--chalk:#17231c;--line:#33473b;color-scheme:dark}
+input,textarea,select{background:var(--chalk);color:var(--ink)}
 *{box-sizing:border-box}
 html,body{height:100%;margin:0}
 body{font-family:Archivo,system-ui,sans-serif;background:var(--chalk);color:var(--ink);display:flex;flex-direction:column;padding-top:env(safe-area-inset-top)}
@@ -43,6 +47,7 @@ select{font:inherit;font-weight:600;padding:9px;border:2px solid var(--ink);bord
 <div id="map"></div>
 <div id="sheet">
   <div id="play">
+    <div class="meta" id="simbar" style="display:none;margin-top:0"><b>Test position.</b> Long-press the map to move, or drag the blue dot. <button id="simExit" style="padding:4px 10px;margin-left:6px">Use GPS</button></div>
     <div class="holerow"><button id="hp">‹</button><button id="hl">No hole data</button><button id="hn">›</button></div>
     <div class="tag" id="tag"></div>
     <div class="big"><span class="club" id="club">–</span><span class="plays" id="plays">Waiting for GPS</span></div>
@@ -54,7 +59,8 @@ select{font:inherit;font-weight:600;padding:9px;border:2px solid var(--ink);bord
   </div>
   <div id="bag">
     <div class="row" style="margin:0 0 8px"><button class="p" id="back">Done</button></div>
-    <label class="s">Range ball boost (%)<input type="number" id="boost" step="0.5" style="width:80px;font:inherit;padding:6px;border:1px solid #14281d;border-radius:4px;text-align:right"></label>
+    <label class="s">Range ball boost (%)<input type="number" id="boost" step="0.5" style="width:80px;font:inherit;padding:6px;border:1px solid var(--ink);border-radius:4px;text-align:right"></label>
+    <label class="s">Theme<select id="theme"><option value="auto">Auto</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
     <div class="meta">Carry yards at the range, per club. Real balls go further by the boost above.</div>
     <div id="clubs"></div>
     <div class="meta" style="margin-top:14px"><b>Shot log</b> (walked distance, so it includes roll)</div>
@@ -108,16 +114,59 @@ function toXY(q,o){return {x:rad(q.lng-o.lng)*Math.cos(rad(o.lat))*R,y:rad(q.lat
 function segDist(a,b){const dx=b.x-a.x,dy=b.y-a.y,l=dx*dx+dy*dy;let t=l?(-a.x*dx-a.y*dy)/l:0;t=Math.max(0,Math.min(1,t));return Math.hypot(a.x+t*dx,a.y+t*dy)}
 function holeDist(h,p){const xy=h.pts.map(q=>toXY(q,p));if(xy.length<2)return Math.hypot(xy[0].x,xy[0].y);let m=1e9;for(let i=0;i<xy.length-1;i++)m=Math.min(m,segDist(xy[i],xy[i+1]));return m}
 
-// GPS
-navigator.geolocation.watchPosition(p=>{
+// Position: real GPS, or a test position (long-press the map; drag the blue dot to walk the hole)
+let sim=false,realPos=null,swallowClick=false;
+function setMe(lat,lng){
   const first=!me;
-  me={lat:p.coords.latitude,lng:p.coords.longitude};
-  if(!meMarker)meMarker=L.marker(me,{icon:L.divIcon({className:"",html:'<div class="me" style="width:16px;height:16px"></div>',iconSize:[16,16],iconAnchor:[8,8]})}).addTo(map);
-  else meMarker.setLatLng(me);
-  if(first){map.setView(me,18);loadWeather()}
+  me={lat,lng};
+  if(!meMarker){
+    meMarker=L.marker(me,{draggable:true,icon:L.divIcon({className:"",html:'<div class="me" style="width:16px;height:16px"></div>',iconSize:[16,16],iconAnchor:[8,8]})}).addTo(map);
+    meMarker.on("drag",e=>{if(!sim)return;const q=e.target.getLatLng();me={lat:q.lat,lng:q.lng};update()});
+    meMarker.on("dragend",()=>{if(sim&&fetchedAt&&dist(me,fetchedAt)>600){loadCourse();loadWeather()}});
+    if(!sim)meMarker.dragging.disable();
+  }else meMarker.setLatLng(me);
+  if(first&&!sim){map.setView(me,18);loadWeather()}
   if(first||(fetchedAt&&dist(me,fetchedAt)>600))loadCourse();
   update();
+}
+navigator.geolocation.watchPosition(p=>{
+  realPos={lat:p.coords.latitude,lng:p.coords.longitude};
+  if(!sim)setMe(realPos.lat,realPos.lng);
 },e=>{$("meta").textContent="No GPS: "+e.message+". Check Safari location permission for this site."},{enableHighAccuracy:true,maximumAge:2000});
+
+function startSim(ll){
+  sim=true;
+  if(aimMarker){map.removeLayer(aimMarker);aimMarker=null}aim=null;
+  lastMeElev=null;manual=false;cur=null;
+  setMe(ll.lat,ll.lng);
+  meMarker.dragging.enable();
+  map.setView(me,Math.max(map.getZoom(),18));
+  loadWeather();
+}
+function exitSim(){
+  sim=false;
+  if(meMarker)meMarker.dragging.disable();
+  lastMeElev=null;
+  if(realPos){setMe(realPos.lat,realPos.lng);map.setView(me,18);loadWeather()}
+  else{me=null;if(meMarker){map.removeLayer(meMarker);meMarker=null}update()}
+}
+$("simExit").onclick=exitSim;
+// long-press on the map (about 0.6 s, without moving) sets the test position
+{
+  const box=map.getContainer();let t=null,sx=0,sy=0;
+  const stop=()=>{if(t){clearTimeout(t);t=null}};
+  box.addEventListener("pointerdown",e=>{
+    if(e.target.closest&&e.target.closest(".leaflet-marker-icon,.leaflet-control"))return;
+    sx=e.clientX;sy=e.clientY;stop();
+    t=setTimeout(()=>{
+      t=null;swallowClick=true;setTimeout(()=>{swallowClick=false},900);
+      const r=box.getBoundingClientRect();
+      startSim(map.containerPointToLatLng([sx-r.left,sy-r.top]));
+    },600);
+  });
+  box.addEventListener("pointermove",e=>{if(t&&Math.hypot(e.clientX-sx,e.clientY-sy)>10)stop()});
+  box.addEventListener("pointerup",stop);box.addEventListener("pointercancel",stop);
+}
 
 async function loadWeather(){
   if(!me)return;
@@ -219,7 +268,7 @@ function clearAim(){
   if(aimMarker){map.removeLayer(aimMarker);aimMarker=null}
   update();
 }
-map.on("click",e=>setAim(e.latlng));
+map.on("click",e=>{if(swallowClick){swallowClick=false;return}setAim(e.latlng)});
 $("clear").onclick=clearAim;
 
 // Elevation: from a terrain model (about 25 m resolution), so it is good for slope trends, not exact heights
@@ -292,6 +341,7 @@ function update(){
     $("hl").textContent=`Hole ${isNaN(h.ref)?"?":h.ref}${h.par?" · par "+h.par:""}${manual?" · tap for auto":""}`;
     L.polyline(h.pts,{color:"#fff",weight:2,opacity:.55,interactive:false}).addTo(holeLayer);
   }else $("hl").textContent=holes.length?"Not on a hole":"No hole data";
+  $("simbar").style.display=sim?"":"none";
   $("clear").disabled=!aim;$("clear").style.opacity=aim?1:.45;
 
   const g=currentGreen();
@@ -302,7 +352,7 @@ function update(){
   }else if(greenMarker){map.removeLayer(greenMarker);greenMarker=null}
   if(greenLine){map.removeLayer(greenLine);greenLine=null}
   if(aimLine){map.removeLayer(aimLine);aimLine=null}
-  if(!me)return;
+  if(!me){$("tag").textContent="";$("club").textContent="–";$("plays").textContent="Waiting for GPS";$("meta").textContent="Allow location when Safari asks, or long-press the map to set a test position.";$("alt").textContent="";$("haz").textContent="";return}
   if(g)greenLine=L.polyline([me,g.c],{color:"#fff",weight:2,dashArray:"6 6",interactive:false}).addTo(map);
   if(aim)aimLine=L.polyline([me,aim],{color:"#ffd23f",weight:2,dashArray:"2 6",interactive:false}).addTo(map);
 
@@ -456,6 +506,7 @@ $("impApply").onclick=()=>{
 
 // Bag editor
 function drawBag(){
+  $("theme").value=S.theme||"auto";
   drawShots();
   $("boost").value=S.boost;
   $("clubs").innerHTML="";
@@ -466,6 +517,9 @@ function drawBag(){
     $("clubs").appendChild(r);
   }
 }
+function applyTheme(){const t=S.theme||"auto";if(t==="auto")delete document.documentElement.dataset.theme;else document.documentElement.dataset.theme=t}
+applyTheme();
+$("theme").onchange=e=>{S.theme=e.target.value;save();applyTheme()};
 fillClubSelect();
 $("boost").onchange=e=>{S.boost=+e.target.value||0;save();update()};
 $("bagBtn").onclick=()=>{drawBag();$("play").style.display="none";$("bag").style.display="block"};
