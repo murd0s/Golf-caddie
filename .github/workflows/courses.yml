@@ -1,4 +1,4 @@
-name: Fetch courses
+name: Fetch courses v2
 
 # Downloads course maps (holes, greens, bunkers, water) from OpenStreetMap and saves them
 # in the courses folder so the app can load them instantly instead of asking a busy server.
