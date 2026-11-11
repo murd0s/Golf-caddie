@@ -217,6 +217,30 @@ async function loadCourse(){
   if(fetching){refetch=true;return}
   fetching=true;$("find").textContent="Searching…";
   const at={lat:me.lat,lng:me.lng};
+  // 1) preloaded course files saved in the repo (courses/index.json), if one is close by
+  try{
+    const ir=await fetch("courses/index.json",{cache:"no-cache"});
+    if(ir.ok){
+      const idx=await ir.json();
+      let best=null,bd=1e9;
+      for(const c of idx){const d=dist(at,{lat:c.lat,lng:c.lng});if(d<bd){bd=d;best=c}}
+      if(best&&bd<3500){
+        const cr=await fetch("courses/"+best.file,{cache:"no-cache"});
+        if(cr.ok){
+          const cd=await cr.json();
+          if(cd&&Array.isArray(cd.elements)&&cd.elements.length){
+            applyCourse(cd.elements);
+            fetchedAt={lat:best.lat,lng:best.lng};
+            try{localStorage.setItem("course-v1",JSON.stringify({els:cd.elements,at:fetchedAt}))}catch(e){}
+            fetching=false;$("find").textContent="Find hole";update();
+            if(refetch){refetch=false;loadCourse()}
+            return;
+          }
+        }
+      }
+    }
+  }catch(e){}
+  // 2) otherwise ask the live map servers
   const a=`(around:1000,${at.lat},${at.lng})`;
   // exact tag matches are much faster on Overpass than a regex over every golf way in the world
   const q=`[out:json][timeout:15];(${["hole","green","bunker","water_hazard","lateral_water_hazard"].map(t=>`way["golf"="${t}"]${a};`).join("")});out geom;`;
