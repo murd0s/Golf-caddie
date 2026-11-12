@@ -1,0 +1,97 @@
+name: Fetch Vale Royal
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download Vale Royal
+        run: |
+          python3 - <<'PY'
+          import json, os, re, sys, time, urllib.parse, urllib.request
+
+          NAME = "Vale Royal Abbey"
+          MATCH = "Vale Royal"
+          RADIUS = 1800
+          SERVERS = [
+              "https://overpass-api.de/api/interpreter",
+              "https://overpass.kumi.systems/api/interpreter",
+              "https://overpass.private.coffee/api/interpreter",
+              "https://overpass.openstreetmap.fr/api/interpreter",
+          ]
+          UA = "golf-caddie-course-fetch/1.0 (GitHub Actions)"
+
+          def overpass(q):
+              for rnd in range(3):
+                  for s in SERVERS:
+                      try:
+                          req = urllib.request.Request(s, data=urllib.parse.urlencode({"data": q}).encode(), headers={"User-Agent": UA})
+                          with urllib.request.urlopen(req, timeout=40) as r:
+                              return json.load(r)
+                      except Exception as e:
+                          print("  server failed:", s, e, flush=True)
+                          time.sleep(3)
+              raise RuntimeError("All map servers failed")
+
+          # Step 1: find the course by name and get its centre
+          q1 = f'[out:json][timeout:25];(way["leisure"="golf_course"]["name"~"{MATCH}",i];relation["leisure"="golf_course"]["name"~"{MATCH}",i];);out center;'
+          d1 = overpass(q1)
+          cs = [e for e in d1.get("elements", []) if "center" in e or "lat" in e]
+          if not cs:
+              print("Could not find a golf course named", MATCH)
+              sys.exit(1)
+          c = cs[0]["center"] if "center" in cs[0] else cs[0]
+          lat, lon = round(c["lat"], 6), round(c["lon"], 6)
+          print("Found:", cs[0].get("tags", {}).get("name"), lat, lon, flush=True)
+
+          # Step 2: get the hole lines, greens and hazards around that centre
+          around = f"(around:{RADIUS},{lat},{lon})"
+          parts = "".join(f'way["golf"="{t}"]{around};' for t in ("hole", "green", "bunker", "water_hazard", "lateral_water_hazard"))
+          d2 = overpass(f"[out:json][timeout:25];({parts});out geom;")
+
+          els = []
+          for w in d2.get("elements", []):
+              g = [p for p in w.get("geometry", []) if p]
+              tags = w.get("tags", {})
+              if len(g) < 2 or "golf" not in tags: continue
+              els.append({
+                  "tags": {k: tags[k] for k in ("golf", "ref", "par") if k in tags},
+                  "geometry": [{"lat": round(p["lat"], 6), "lon": round(p["lon"], 6)} for p in g],
+              })
+          holes = sum(1 for e in els if e["tags"]["golf"] == "hole")
+          greens = sum(1 for e in els if e["tags"]["golf"] == "green")
+          print(f"{len(els)} features, {holes} hole lines, {greens} greens", flush=True)
+          if holes == 0:
+              print("No hole lines found, not saving.")
+              sys.exit(1)
+
+          os.makedirs("courses", exist_ok=True)
+          fn = "vale-royal-abbey.json"
+          with open("courses/" + fn, "w") as f:
+              json.dump({"name": NAME, "lat": lat, "lng": lon, "elements": els}, f, separators=(",", ":"))
+
+          # Merge into the index, keeping every other course that is already saved
+          try:
+              index = json.load(open("courses/index.json"))
+          except Exception:
+              index = []
+          index = [c for c in index if c.get("name") != NAME]
+          index.append({"name": NAME, "lat": lat, "lng": lon, "file": fn})
+          with open("courses/index.json", "w") as f:
+              json.dump(index, f, indent=1)
+          print("Saved. Courses in index:", len(index))
+          PY
+      - name: Save to the repo
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@users.noreply.github.com"
+          git add courses
+          git commit -m "Add Vale Royal course" || echo "No changes"
+          git pull --rebase || true
+          git push
