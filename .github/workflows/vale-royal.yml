@@ -33,7 +33,11 @@ jobs:
                       try:
                           req = urllib.request.Request(s, data=urllib.parse.urlencode({"data": q}).encode(), headers={"User-Agent": UA})
                           with urllib.request.urlopen(req, timeout=40) as r:
-                              return json.load(r)
+                              data = json.load(r)
+                          rm = str(data.get("remark", "")).lower()
+                          if "error" in rm or "timed out" in rm:
+                              raise RuntimeError(data.get("remark"))
+                          return data
                       except Exception as e:
                           print("  server failed:", s, e, flush=True)
                           time.sleep(3)
@@ -43,12 +47,14 @@ jobs:
           q1 = f'[out:json][timeout:25];(way["leisure"="golf_course"]["name"~"{MATCH}",i];relation["leisure"="golf_course"]["name"~"{MATCH}",i];);out center;'
           d1 = overpass(q1)
           cs = [e for e in d1.get("elements", []) if "center" in e or "lat" in e]
-          if not cs:
-              print("Could not find a golf course named", MATCH)
-              sys.exit(1)
-          c = cs[0]["center"] if "center" in cs[0] else cs[0]
-          lat, lon = round(c["lat"], 6), round(c["lon"], 6)
-          print("Found:", cs[0].get("tags", {}).get("name"), lat, lon, flush=True)
+          if cs:
+              c = cs[0]["center"] if "center" in cs[0] else cs[0]
+              lat, lon = round(c["lat"], 6), round(c["lon"], 6)
+              print("Found by name:", cs[0].get("tags", {}).get("name"), lat, lon, flush=True)
+          else:
+              # not found by name: use the abbey, which sits in the middle of the course
+              lat, lon = 53.2247, -2.5426
+              print("Not found by name, using the abbey location", lat, lon, flush=True)
 
           # Step 2: get the hole lines, greens and hazards around that centre
           around = f"(around:{RADIUS},{lat},{lon})"
