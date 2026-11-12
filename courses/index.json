@@ -34,5 +34,11 @@
   "lat": 53.1833,
   "lng": -2.6167,
   "file": "portal.json"
+ },
+ {
+  "name": "Vale Royal Abbey",
+  "lat": 53.2247,
+  "lng": -2.5426,
+  "file": "vale-royal-abbey.json"
  }
 ]
