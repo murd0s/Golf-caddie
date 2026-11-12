@@ -6,27 +6,29 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Club">
 <meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#253c2c">
 <title>Club</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800&display=swap" rel="stylesheet">
 <style>
-:root{--ink:#14281d;--chalk:#f2f4ef;--flag:#d8432f;--sand:#c9b27c;--line:#cfd6c9;color-scheme:light}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--ink:#e6eee8;--chalk:#17231c;--line:#33473b;color-scheme:dark}}
-:root[data-theme="dark"]{--ink:#e6eee8;--chalk:#17231c;--line:#33473b;color-scheme:dark}
+:root{--ink:#1d2a21;--chalk:#f1efe4;--card:#e8e5d6;--head:#253c2c;--gold:#c29d57;--goldtxt:#8a6a28;--flag:#d8432f;--sand:#c29d57;--line:#d3cfba;color-scheme:light}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--ink:#eae8dd;--chalk:#10110e;--card:#28271b;--goldtxt:#c29d57;--line:#3b3926;color-scheme:dark}}
+:root[data-theme="dark"]{--ink:#eae8dd;--chalk:#10110e;--card:#28271b;--goldtxt:#c29d57;--line:#3b3926;color-scheme:dark}
 input,textarea,select{background:var(--chalk);color:var(--ink)}
+body::before{content:"";display:block;flex:none;height:env(safe-area-inset-top);background:var(--head)}
 *{box-sizing:border-box}
 html,body{height:100%;margin:0}
-body{font-family:Archivo,system-ui,sans-serif;background:var(--chalk);color:var(--ink);display:flex;flex-direction:column;padding-top:env(safe-area-inset-top)}
+body{font-family:Archivo,system-ui,sans-serif;background:var(--chalk);color:var(--ink);display:flex;flex-direction:column}
 #map{flex:1;min-height:0}
-#sheet{background:var(--chalk);border-top:3px solid var(--ink);padding:12px 16px calc(12px + env(safe-area-inset-bottom));max-height:52%;overflow:auto}
+#sheet{background:var(--card);border-top:3px solid var(--gold);padding:12px 16px calc(12px + env(safe-area-inset-bottom));max-height:52%;overflow:auto}
 .big{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
 .club{font-size:44px;font-weight:800;line-height:1}
 .plays{font-size:18px;font-weight:600}
 .meta{font-size:14px;margin:6px 0;opacity:.85}
 .alt{font-size:14px;margin-top:4px}
 .row{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
-button{font:inherit;font-weight:600;padding:10px 14px;border:2px solid var(--ink);background:var(--chalk);color:var(--ink);border-radius:6px}
-button.p{background:var(--ink);color:var(--chalk)}
+button{font:inherit;font-weight:600;padding:10px 14px;border:2px solid var(--gold);background:var(--card);color:var(--ink);border-radius:6px}
+button.p{background:var(--gold);color:#10110e}
 #bag{display:none}
 .bagrow{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);padding:6px 0}
 .bagrow input{width:80px;font:inherit;padding:6px;border:1px solid var(--ink);border-radius:4px;text-align:right}
@@ -34,10 +36,10 @@ label.s{display:flex;justify-content:space-between;align-items:center;padding:6p
 .holerow{display:flex;gap:8px;margin-bottom:8px}
 #hl{flex:1;padding:6px 10px}
 #hp,#hn{padding:6px 14px}
-.tag{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;opacity:.7;margin-bottom:2px;min-height:14px}
-.windbox{background:rgba(20,40,29,.85);color:#fff;border-radius:8px;padding:6px 8px;text-align:center;font-weight:600;font-size:13px;line-height:1.15;min-width:64px;pointer-events:none}
+.tag{color:var(--goldtxt);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;opacity:1;margin-bottom:2px;min-height:14px}
+.windbox{background:rgba(37,60,44,.92);color:#eae8dd;border:1px solid var(--gold);border-radius:8px;padding:6px 8px;text-align:center;font-weight:600;font-size:13px;line-height:1.15;min-width:64px;pointer-events:none}
 .windbox small{display:block;font-weight:400;opacity:.8;font-size:11px}
-select{font:inherit;font-weight:600;padding:9px;border:2px solid var(--ink);border-radius:6px;background:var(--chalk);color:var(--ink);max-width:45%}
+select{font:inherit;font-weight:600;padding:9px;border:2px solid var(--gold);border-radius:6px;background:var(--chalk);color:var(--ink);max-width:45%}
 .aim{background:#ffd23f;border:2px solid #fff;border-radius:50%}
 .pin{background:var(--flag);border:2px solid #fff;border-radius:50%}
 .me{background:#1d6fe8;border:3px solid #fff;border-radius:50%;box-shadow:0 0 0 2px #1d6fe8}
@@ -55,7 +57,7 @@ select{font:inherit;font-weight:600;padding:9px;border:2px solid var(--ink);bord
     <div class="alt" id="alt"></div>
     <div class="meta" id="haz"></div>
     <div class="row" id="shotrow"><select id="shotClub"></select><button class="p" id="shotBtn">Start shot</button><button id="shotX" style="display:none">Cancel</button></div>
-    <div class="row"><button class="p" id="find">Find hole</button><button id="clear">Clear aim</button><button id="rotBtn">Rotate: off</button><button id="bagBtn">Bag and settings</button></div>
+    <div class="row"><button class="p" id="find">Find hole</button><button id="clear">Clear aim</button><button id="rotBtn">Rotate: off</button><button id="followBtn">Follow: on</button><button id="bagBtn">Bag and settings</button></div>
   </div>
   <div id="bag">
     <div class="row" style="margin:0 0 8px"><button class="p" id="back">Done</button></div>
@@ -93,10 +95,34 @@ const overlay=L.layerGroup().addTo(map), holeLayer=L.layerGroup().addTo(map);
 const windCtl=L.control({position:"topright"});
 windCtl.onAdd=()=>{
   const d=L.DomUtil.create("div","windbox");
-  d.innerHTML='<svg viewBox="-20 -20 40 40" width="40" height="40"><g id="wg"><path d="M0 -17 L10 3 L3.5 3 L3.5 17 L-3.5 17 L-3.5 3 L-10 3 Z" fill="#fff"/></g></svg><div id="wspd">Wind –</div><small id="wsub">loading</small>';
+  d.innerHTML='<svg viewBox="-20 -20 40 40" width="40" height="40"><g id="wg"><path d="M0 -17 L10 3 L3.5 3 L3.5 17 L-3.5 17 L-3.5 3 L-10 3 Z" fill="#c29d57"/></g></svg><div id="wspd">Wind –</div><small id="wsub">loading</small>';
   return d;
 };
 windCtl.addTo(map);
+// Follow me: keeps the blue dot low on the screen (about 72% down) so most of the map shows what is ahead.
+// Works north-up or with Rotate on. Dragging the map turns it off; tap the button to snap back.
+let follow=S.follow!==false,dotDragging=false,inFollow=false;
+const FOLLOW_LOW=0.72;
+const followLabel=()=>{$("followBtn").textContent="Follow: "+(follow?"on":"off")};
+function applyFollow(){
+  if(!follow||!me||dotDragging||inFollow)return;
+  inFollow=true;
+  try{
+    const z=map.getZoom(),size=map.getSize();
+    const mpp=156543.03392*Math.cos(rad(me.lat))/Math.pow(2,z);
+    const ahead=(FOLLOW_LOW-0.5)*size.y*mpp;                 // metres from the dot to the map centre
+    const up=((-map.getBearing())%360+360)%360;               // compass direction that is up on screen
+    const lat=me.lat+(ahead*Math.cos(rad(up))/R)*180/Math.PI;
+    const lng=me.lng+(ahead*Math.sin(rad(up))/(R*Math.cos(rad(me.lat))))*180/Math.PI;
+    map.setView([lat,lng],z,{animate:false});
+  }finally{inFollow=false}
+}
+function setFollow(on){follow=on;S.follow=on;save();followLabel();if(on)applyFollow()}
+$("followBtn").onclick=()=>setFollow(!follow);
+map.on("dragstart",()=>{if(follow)setFollow(false)});
+map.on("rotate",applyFollow);
+map.on("zoomend",applyFollow);
+followLabel();
 const COMP=["N","NE","E","SE","S","SW","W","NW"];
 map.on("rotate",()=>{try{updateWind()}catch(e){}});
 function updateWind(){
@@ -123,6 +149,8 @@ function setMe(lat,lng){
   me={lat,lng};
   if(!meMarker){
     meMarker=L.marker(me,{draggable:true,icon:L.divIcon({className:"",html:'<div class="me" style="width:16px;height:16px"></div>',iconSize:[16,16],iconAnchor:[8,8]})}).addTo(map);
+    meMarker.on("dragstart",()=>{dotDragging=true});
+    meMarker.on("dragend",()=>{dotDragging=false;applyFollow()});
     meMarker.on("drag",e=>{if(!sim)return;const q=e.target.getLatLng();me={lat:q.lat,lng:q.lng};update()});
     meMarker.on("dragend",()=>{if(sim&&(!fetchedAt||dist(me,fetchedAt)>600)){loadCourse();loadWeather()}});
     if(!sim)meMarker.dragging.disable();
@@ -130,6 +158,7 @@ function setMe(lat,lng){
   if(first&&!sim){map.setView(me,18);loadWeather()}
   if(first||(fetchedAt&&dist(me,fetchedAt)>600))loadCourse();
   update();
+  applyFollow();
 }
 navigator.geolocation.watchPosition(p=>{
   realPos={lat:p.coords.latitude,lng:p.coords.longitude};
@@ -147,13 +176,14 @@ function startSim(ll){
   if(had)loadCourse();
   meMarker.dragging.enable();
   map.setView(me,Math.max(map.getZoom(),18));
+  applyFollow();
   loadWeather();
 }
 function exitSim(){
   sim=false;
   if(meMarker)meMarker.dragging.disable();
   lastMeElev=null;
-  if(realPos){setMe(realPos.lat,realPos.lng);map.setView(me,18);loadWeather()}
+  if(realPos){setMe(realPos.lat,realPos.lng);map.setView(me,18);applyFollow();loadWeather()}
   else{me=null;if(meMarker){map.removeLayer(meMarker);meMarker=null}update()}
 }
 $("simExit").onclick=exitSim;
@@ -232,7 +262,7 @@ function applyCourse(els){
     const kind=w.tags&&w.tags.golf;
     if(!kind)continue;
     if(kind==="hole"){hs.push({ref:parseInt(w.tags.ref),par:w.tags.par,pts});continue}
-    L.polygon(pts,{color:kind==="green"?"#7dff9a":kind==="bunker"?"#c9b27c":"#4aa3ff",weight:2,fillOpacity:.15,interactive:false}).addTo(overlay);
+    L.polygon(pts,{color:kind==="green"?"#7dff9a":kind==="bunker"?"#c29d57":"#4aa3ff",weight:2,fillOpacity:.15,interactive:false}).addTo(overlay);
     if(kind==="green")gs.push({c:{lat:pts.reduce((s,p)=>s+p.lat,0)/pts.length,lng:pts.reduce((s,p)=>s+p.lng,0)/pts.length},pts});
     else{const la=pts.map(p=>p.lat),ln=pts.map(p=>p.lng);hz.push({kind:kind==="bunker"?"bunker":"water",pts,bb:{n:Math.max(...la),s:Math.min(...la),e:Math.max(...ln),w:Math.min(...ln)}})}
   }
