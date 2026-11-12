@@ -43,20 +43,11 @@ jobs:
                           time.sleep(3)
               raise RuntimeError("All map servers failed")
 
-          # Step 1: find the course by name and get its centre
-          q1 = f'[out:json][timeout:25];(way["leisure"="golf_course"]["name"~"{MATCH}",i];relation["leisure"="golf_course"]["name"~"{MATCH}",i];);out center;'
-          d1 = overpass(q1)
-          cs = [e for e in d1.get("elements", []) if "center" in e or "lat" in e]
-          if cs:
-              c = cs[0]["center"] if "center" in cs[0] else cs[0]
-              lat, lon = round(c["lat"], 6), round(c["lon"], 6)
-              print("Found by name:", cs[0].get("tags", {}).get("name"), lat, lon, flush=True)
-          else:
-              # not found by name: use the abbey, which sits in the middle of the course
-              lat, lon = 53.2247, -2.5426
-              print("Not found by name, using the abbey location", lat, lon, flush=True)
+          # The abbey sits in the middle of the course, so search around it
+          lat, lon = 53.2247, -2.5426
+          print("Searching around the abbey", lat, lon, flush=True)
 
-          # Step 2: get the hole lines, greens and hazards around that centre
+          # Get the hole lines, greens and hazards around that centre
           around = f"(around:{RADIUS},{lat},{lon})"
           parts = "".join(f'way["golf"="{t}"]{around};' for t in ("hole", "green", "bunker", "water_hazard", "lateral_water_hazard"))
           d2 = overpass(f"[out:json][timeout:25];({parts});out geom;")
