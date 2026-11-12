@@ -55,7 +55,7 @@ select{font:inherit;font-weight:600;padding:9px;border:2px solid var(--ink);bord
     <div class="alt" id="alt"></div>
     <div class="meta" id="haz"></div>
     <div class="row" id="shotrow"><select id="shotClub"></select><button class="p" id="shotBtn">Start shot</button><button id="shotX" style="display:none">Cancel</button></div>
-    <div class="row"><button class="p" id="find">Find hole</button><button id="clear">Clear aim</button><button id="bagBtn">Bag and settings</button></div>
+    <div class="row"><button class="p" id="find">Find hole</button><button id="clear">Clear aim</button><button id="rotBtn">Rotate: off</button><button id="bagBtn">Bag and settings</button></div>
   </div>
   <div id="bag">
     <div class="row" style="margin:0 0 8px"><button class="p" id="back">Done</button></div>
@@ -74,6 +74,7 @@ select{font:inherit;font-weight:600;padding:9px;border:2px solid var(--ink);bord
   </div>
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="leaflet-rotate.js"></script>
 <script>if("serviceWorker" in navigator)navigator.serviceWorker.register("sw.js").catch(()=>{})</script>
 <script>
 const DEFAULT_BAG={"Driver":230,"3 wood":210,"5 wood":195,"4 iron":180,"5 iron":170,"6 iron":160,"7 iron":150,"8 iron":140,"9 iron":130,"PW":118,"GW":105,"SW":90,"LW":70};
@@ -85,10 +86,10 @@ const $=id=>document.getElementById(id);
 const YD=1.09361, R=6371000, rad=d=>d*Math.PI/180;
 
 // Map
-const map=L.map("map",{zoomControl:false,maxZoom:20}).setView([53.2465,-2.5755],16);
+const map=L.map("map",{zoomControl:false,maxZoom:20,rotate:true,rotateControl:false,touchRotate:false,shiftKeyRotate:false,pitchDrag:false}).setView([53.2465,-2.5755],16);
 L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",{maxZoom:20,maxNativeZoom:19,attribution:"Esri"}).addTo(map);
 const overlay=L.layerGroup().addTo(map), holeLayer=L.layerGroup().addTo(map);
-// Wind badge: the arrow points the way the wind is blowing (map is north-up)
+// Wind badge: the arrow points the way the wind is blowing (it turns with the map when Rotate is on)
 const windCtl=L.control({position:"topright"});
 windCtl.onAdd=()=>{
   const d=L.DomUtil.create("div","windbox");
@@ -97,9 +98,10 @@ windCtl.onAdd=()=>{
 };
 windCtl.addTo(map);
 const COMP=["N","NE","E","SE","S","SW","W","NW"];
+map.on("rotate",()=>{try{updateWind()}catch(e){}});
 function updateWind(){
   if(!wx)return;
-  $("wg").setAttribute("transform",`rotate(${Math.round((wx.d+180)%360)})`);
+  $("wg").setAttribute("transform",`rotate(${Math.round(((wx.d+180+map.getBearing())%360+360)%360)})`);
   $("wspd").textContent=`${Math.round(wx.w)} mph`;
   $("wsub").textContent=`from ${COMP[Math.round(wx.d/45)%8]}`+(wx.g&&wx.g>wx.w+3?` · gusts ${Math.round(wx.g)}`:"");
 }
@@ -171,6 +173,34 @@ $("simExit").onclick=exitSim;
   box.addEventListener("pointermove",e=>{if(t&&Math.hypot(e.clientX-sx,e.clientY-sy)>10)stop()});
   box.addEventListener("pointerup",stop);box.addEventListener("pointercancel",stop);
 }
+
+// Rotate the map so the way the phone is pointing is up (compass). Starts from the button because iOS asks permission.
+let rotOn=false,hd=null,lastRot=0;
+function onCompass(e){
+  let h=typeof e.webkitCompassHeading==="number"?e.webkitCompassHeading:(e.absolute&&typeof e.alpha==="number"?360-e.alpha:null);
+  if(h===null||!isFinite(h))return;
+  hd=hd===null?h:(hd+((h-hd+540)%360-180)*0.3+360)%360;   // smooth, going the short way round 0/360
+  const now=Date.now();if(now-lastRot<100)return;
+  const b=(360-hd)%360,cb=(map.getBearing()%360+360)%360;
+  if(Math.abs((b-cb+540)%360-180)<1.5)return;
+  lastRot=now;map.setBearing(b);
+}
+async function setRot(on){
+  const evs=["deviceorientation","deviceorientationabsolute"];
+  if(on){
+    try{
+      if(typeof DeviceOrientationEvent==="undefined")throw 0;
+      if(DeviceOrientationEvent.requestPermission&&await DeviceOrientationEvent.requestPermission()!=="granted")throw 0;
+    }catch(e){toast="Compass not available. Allow Motion and Orientation in Safari settings.";setTimeout(()=>{toast="";update()},6000);update();return}
+    for(const ev of evs)window.addEventListener(ev,onCompass,true);
+    rotOn=true;
+  }else{
+    for(const ev of evs)window.removeEventListener(ev,onCompass,true);
+    rotOn=false;hd=null;map.setBearing(0);
+  }
+  $("rotBtn").textContent="Rotate: "+(rotOn?"on":"off");
+}
+$("rotBtn").onclick=()=>setRot(!rotOn);
 
 async function loadWeather(){
   if(!me)return;
@@ -425,7 +455,10 @@ function update(){
     const ds=g.pts.map(q=>dist(me,q));
     range=`Green: front ${Math.round(Math.min(...ds))} · centre ${Math.round(dist(me,g.c))} · back ${Math.round(Math.max(...ds))}`;
   }
-  const clubs=Object.entries(S.bag).map(([n,c])=>[n,c*(1+S.boost/100)]).sort((a,b)=>b[1]-a[1]);
+  let clubs=Object.entries(S.bag).map(([n,c])=>[n,c*(1+S.boost/100)]).sort((a,b)=>b[1]-a[1]);
+  // Driver only from a tee: within 45 yd of the start of a hole line. With no hole data it cannot tell, so it allows it.
+  const onTee=!holes.length||holes.some(h=>h.pts.length&&dist(me,h.pts[0])<=45);
+  if(!onTee){const nd=clubs.filter(c=>c[0]!=="Driver");if(nd.length)clubs=nd}
   let best=clubs[0];
   for(const c of clubs)if(Math.abs(c[1]-p.adj)<Math.abs(best[1]-p.adj))best=c;
   const i=clubs.indexOf(best);
