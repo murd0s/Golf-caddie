@@ -175,12 +175,17 @@ $("simExit").onclick=exitSim;
 }
 
 // Rotate the map so the way the phone is pointing is up (compass). Starts from the button because iOS asks permission.
-let rotOn=false,hd=null,lastRot=0;
+let rotOn=false,hd=null,lastRot=0,lastLbl=0,gotHd=false,rotTimer=null;
+const rotLabel=t=>{$("rotBtn").textContent="Rotate: "+t};
+const rotMsg=(m,ms)=>{toast=m;setTimeout(()=>{if(toast===m){toast="";update()}},ms);update()};
 function onCompass(e){
   let h=typeof e.webkitCompassHeading==="number"?e.webkitCompassHeading:(e.absolute&&typeof e.alpha==="number"?360-e.alpha:null);
   if(h===null||!isFinite(h))return;
+  gotHd=true;
   hd=hd===null?h:(hd+((h-hd+540)%360-180)*0.3+360)%360;   // smooth, going the short way round 0/360
-  const now=Date.now();if(now-lastRot<100)return;
+  const now=Date.now();
+  if(now-lastLbl>500){lastLbl=now;rotLabel("on "+Math.round(hd)+"°")}
+  if(now-lastRot<100)return;
   const b=(360-hd)%360,cb=(map.getBearing()%360+360)%360;
   if(Math.abs((b-cb+540)%360-180)<1.5)return;
   lastRot=now;map.setBearing(b);
@@ -191,14 +196,16 @@ async function setRot(on){
     try{
       if(typeof DeviceOrientationEvent==="undefined")throw 0;
       if(DeviceOrientationEvent.requestPermission&&await DeviceOrientationEvent.requestPermission()!=="granted")throw 0;
-    }catch(e){toast="Compass not available. Allow Motion and Orientation in Safari settings.";setTimeout(()=>{toast="";update()},6000);update();return}
+    }catch(e){rotLabel("blocked");rotMsg("Compass blocked. If Safari showed no prompt, quit Safari fully and try again, and check Safari's Motion and Orientation access.",12000);return}
     for(const ev of evs)window.addEventListener(ev,onCompass,true);
-    rotOn=true;
+    rotOn=true;gotHd=false;rotLabel("waiting…");
+    clearTimeout(rotTimer);
+    rotTimer=setTimeout(()=>{if(rotOn&&!gotHd){rotLabel("no signal");rotMsg("No compass reading from this phone. Check Location Services > System Services > Compass Calibration is on.",12000)}},3000);
   }else{
+    clearTimeout(rotTimer);
     for(const ev of evs)window.removeEventListener(ev,onCompass,true);
-    rotOn=false;hd=null;map.setBearing(0);
+    rotOn=false;hd=null;map.setBearing(0);rotLabel("off");
   }
-  $("rotBtn").textContent="Rotate: "+(rotOn?"on":"off");
 }
 $("rotBtn").onclick=()=>setRot(!rotOn);
 
