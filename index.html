@@ -11,24 +11,32 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800&display=swap" rel="stylesheet">
 <style>
-:root{--ink:#1d2a21;--chalk:#f1efe4;--card:#e8e5d6;--head:#253c2c;--gold:#c29d57;--goldtxt:#8a6a28;--flag:#d8432f;--sand:#c29d57;--line:#d3cfba;color-scheme:light}
+:root{--ink:#1d2a21;--chalk:#f1efe4;--card:#e8e5d6;--head:#253c2c;--gold:#c29d57;--bord:#c29d57;--ongold:#10110e;--hi:#c29d57;--goldtxt:#8a6a28;--flag:#d8432f;--line:#d3cfba;color-scheme:light}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--ink:#eae8dd;--chalk:#10110e;--card:#28271b;--goldtxt:#c29d57;--line:#3b3926;color-scheme:dark}}
 :root[data-theme="dark"]{--ink:#eae8dd;--chalk:#10110e;--card:#28271b;--goldtxt:#c29d57;--line:#3b3926;color-scheme:dark}
+/* Scheme 2: Vale Royal (burgundy, butter yellow, pale pine) */
+:root[data-scheme="vale"]{--ink:#2b1218;--chalk:#fdefd6;--card:#f5e2bf;--head:#731328;--gold:#731328;--bord:#731328;--ongold:#fdefd6;--hi:#fec40b;--goldtxt:#731328;--line:#e0c999;color-scheme:light}
+@media (prefers-color-scheme:dark){:root[data-scheme="vale"]:not([data-theme="light"]){--ink:#fdefd6;--chalk:#1a0a0e;--card:#2d1219;--head:#731328;--gold:#fec40b;--bord:#fec40b;--ongold:#2b1218;--hi:#fec40b;--goldtxt:#fec40b;--line:#4d2530;color-scheme:dark}}
+:root[data-scheme="vale"][data-theme="dark"]{--ink:#fdefd6;--chalk:#1a0a0e;--card:#2d1219;--head:#731328;--gold:#fec40b;--bord:#fec40b;--ongold:#2b1218;--hi:#fec40b;--goldtxt:#fec40b;--line:#4d2530;color-scheme:dark}
+/* Scheme 3: Jungle (forest green, jungle green, peach) */
+:root[data-scheme="jungle"]{--ink:#012b1d;--chalk:#eef5ef;--card:#dfece3;--head:#012b1d;--gold:#01b36c;--bord:#01b36c;--ongold:#012b1d;--hi:#feb192;--goldtxt:#00774a;--line:#c7ddcd;color-scheme:light}
+@media (prefers-color-scheme:dark){:root[data-scheme="jungle"]:not([data-theme="light"]){--ink:#e4f2e9;--chalk:#01150e;--card:#0a2a1e;--head:#012b1d;--gold:#01b36c;--bord:#01b36c;--ongold:#012b1d;--hi:#feb192;--goldtxt:#3fd896;--line:#164533;color-scheme:dark}}
+:root[data-scheme="jungle"][data-theme="dark"]{--ink:#e4f2e9;--chalk:#01150e;--card:#0a2a1e;--head:#012b1d;--gold:#01b36c;--bord:#01b36c;--ongold:#012b1d;--hi:#feb192;--goldtxt:#3fd896;--line:#164533;color-scheme:dark}
 input,textarea,select{background:var(--chalk);color:var(--ink)}
 body::before{content:"";display:block;flex:none;height:env(safe-area-inset-top);background:var(--head)}
 *{box-sizing:border-box}
 html,body{height:100%;margin:0}
 body{font-family:Archivo,system-ui,sans-serif;background:var(--chalk);color:var(--ink);display:flex;flex-direction:column}
 #map{flex:1;min-height:0}
-#sheet{background:var(--card);border-top:3px solid var(--gold);padding:12px 16px calc(12px + env(safe-area-inset-bottom));max-height:52%;overflow:auto}
+#sheet{background:var(--card);border-top:3px solid var(--bord);padding:12px 16px calc(12px + env(safe-area-inset-bottom));max-height:52%;overflow:auto}
 .big{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
 .club{font-size:44px;font-weight:800;line-height:1}
 .plays{font-size:18px;font-weight:600}
 .meta{font-size:14px;margin:6px 0;opacity:.85}
 .alt{font-size:14px;margin-top:4px}
 .row{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
-button{font:inherit;font-weight:600;padding:10px 14px;border:2px solid var(--gold);background:var(--card);color:var(--ink);border-radius:6px}
-button.p{background:var(--gold);color:#10110e}
+button{font:inherit;font-weight:600;padding:10px 14px;border:2px solid var(--bord);background:var(--card);color:var(--ink);border-radius:6px}
+button.p{background:var(--gold);color:var(--ongold)}
 #bag{display:none}
 .bagrow{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);padding:6px 0}
 .bagrow input{width:80px;font:inherit;padding:6px;border:1px solid var(--ink);border-radius:4px;text-align:right}
@@ -37,11 +45,11 @@ label.s{display:flex;justify-content:space-between;align-items:center;padding:6p
 #hl{flex:1;padding:6px 10px}
 #hp,#hn{padding:6px 14px}
 .tag{color:var(--goldtxt);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;opacity:1;margin-bottom:2px;min-height:14px}
-.windbox{background:rgba(37,60,44,.92);color:#eae8dd;border:1px solid var(--gold);border-radius:8px;padding:6px 8px;text-align:center;font-weight:600;font-size:13px;line-height:1.15;min-width:64px;pointer-events:none}
+.windbox{background:var(--head);background:color-mix(in srgb,var(--head) 92%,transparent);color:#f6f1e4;border:1px solid var(--hi);border-radius:8px;padding:6px 8px;text-align:center;font-weight:600;font-size:13px;line-height:1.15;min-width:64px;pointer-events:none}
 .windbox small{display:block;font-weight:400;opacity:.8;font-size:11px}
-select{font:inherit;font-weight:600;padding:9px;border:2px solid var(--gold);border-radius:6px;background:var(--chalk);color:var(--ink);max-width:45%}
+select{font:inherit;font-weight:600;padding:9px;border:2px solid var(--bord);border-radius:6px;background:var(--chalk);color:var(--ink);max-width:45%}
 .aim{background:#ffd23f;border:2px solid #fff;border-radius:50%}
-.lay{background:#c29d57;border:2px solid #10110e;box-shadow:0 0 0 2px #c29d57;border-radius:3px}
+.lay{background:var(--hi);border:2px solid #10110e;box-shadow:0 0 0 2px var(--hi);border-radius:3px}
 .pin{background:var(--flag);border:2px solid #fff;border-radius:50%}
 .me{background:#1d6fe8;border:3px solid #fff;border-radius:50%;box-shadow:0 0 0 2px #1d6fe8}
 </style>
@@ -65,6 +73,7 @@ select{font:inherit;font-weight:600;padding:9px;border:2px solid var(--gold);bor
     <div class="row" style="margin:0 0 8px"><button class="p" id="back">Done</button></div>
     <label class="s">Range ball boost (%)<input type="number" id="boost" step="0.5" style="width:80px;font:inherit;padding:6px;border:1px solid var(--ink);border-radius:4px;text-align:right"></label>
     <label class="s">Theme<select id="theme"><option value="auto">Auto</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
+    <label class="s">Colour scheme<select id="scheme"><option value="fairway">Fairway (green and gold)</option><option value="vale">Vale Royal (burgundy)</option><option value="jungle">Jungle (green and peach)</option></select></label>
     <label class="s">Lay-up leaves me a full<select id="layClub"></select></label>
     <div class="meta">Carry yards at the range, per club. Real balls go further by the boost above.</div>
     <div id="clubs"></div>
@@ -98,7 +107,7 @@ const overlay=L.layerGroup().addTo(map), holeLayer=L.layerGroup().addTo(map);
 const windCtl=L.control({position:"topright"});
 windCtl.onAdd=()=>{
   const d=L.DomUtil.create("div","windbox");
-  d.innerHTML='<svg viewBox="-20 -20 40 40" width="40" height="40"><g id="wg"><path d="M0 -17 L10 3 L3.5 3 L3.5 17 L-3.5 17 L-3.5 3 L-10 3 Z" fill="#c29d57"/></g></svg><div id="wspd">Wind –</div><small id="wsub">loading</small>';
+  d.innerHTML='<svg viewBox="-20 -20 40 40" width="40" height="40"><g id="wg"><path d="M0 -17 L10 3 L3.5 3 L3.5 17 L-3.5 17 L-3.5 3 L-10 3 Z" style="fill:var(--hi)"/></g></svg><div id="wspd">Wind –</div><small id="wsub">loading</small>';
   return d;
 };
 windCtl.addTo(map);
@@ -695,6 +704,7 @@ function fillLayClub(){const sel=$("layClub");sel.innerHTML=Object.keys(S.bag).f
 function drawBag(){
   fillLayClub();
   $("theme").value=S.theme||"auto";
+  $("scheme").value=S.scheme||"fairway";
   drawShots();
   $("boost").value=S.boost;
   $("clubs").innerHTML="";
@@ -705,9 +715,16 @@ function drawBag(){
     $("clubs").appendChild(r);
   }
 }
-function applyTheme(){const t=S.theme||"auto";if(t==="auto")delete document.documentElement.dataset.theme;else document.documentElement.dataset.theme=t}
+function applyTheme(){
+  const el=document.documentElement,t=S.theme||"auto",sc=S.scheme||"fairway";
+  if(t==="auto")delete el.dataset.theme;else el.dataset.theme=t;
+  if(sc==="fairway")delete el.dataset.scheme;else el.dataset.scheme=sc;
+  const m=document.querySelector('meta[name="theme-color"]'),h=getComputedStyle(el).getPropertyValue("--head").trim();
+  if(m&&h)m.setAttribute("content",h);
+}
 applyTheme();
 $("theme").onchange=e=>{S.theme=e.target.value;save();applyTheme()};
+$("scheme").onchange=e=>{S.scheme=e.target.value;save();applyTheme()};
 fillClubSelect();
 $("layClub").onchange=e=>{S.layClub=e.target.value;save();update()};
 $("boost").onchange=e=>{S.boost=+e.target.value||0;save();update()};
