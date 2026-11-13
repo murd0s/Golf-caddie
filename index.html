@@ -41,6 +41,7 @@ label.s{display:flex;justify-content:space-between;align-items:center;padding:6p
 .windbox small{display:block;font-weight:400;opacity:.8;font-size:11px}
 select{font:inherit;font-weight:600;padding:9px;border:2px solid var(--gold);border-radius:6px;background:var(--chalk);color:var(--ink);max-width:45%}
 .aim{background:#ffd23f;border:2px solid #fff;border-radius:50%}
+.lay{background:#c29d57;border:2px solid #10110e;box-shadow:0 0 0 2px #c29d57;border-radius:3px}
 .pin{background:var(--flag);border:2px solid #fff;border-radius:50%}
 .me{background:#1d6fe8;border:3px solid #fff;border-radius:50%;box-shadow:0 0 0 2px #1d6fe8}
 </style>
@@ -56,6 +57,7 @@ select{font:inherit;font-weight:600;padding:9px;border:2px solid var(--gold);bor
     <div class="meta" id="meta">Allow location when Safari asks.</div>
     <div class="alt" id="alt"></div>
     <div class="meta" id="haz"></div>
+    <div class="meta" id="layrow" style="display:none"><span id="lay"></span> <button id="layBtn" style="padding:4px 10px;margin-left:4px">Aim there</button></div>
     <div class="row" id="shotrow"><select id="shotClub"></select><button class="p" id="shotBtn">Start shot</button><button id="shotX" style="display:none">Cancel</button></div>
     <div class="row"><button class="p" id="find">Find hole</button><button id="clear">Clear aim</button><button id="rotBtn">Rotate: off</button><button id="followBtn">Follow: on</button><button id="bagBtn">Bag and settings</button></div>
   </div>
@@ -63,6 +65,7 @@ select{font:inherit;font-weight:600;padding:9px;border:2px solid var(--gold);bor
     <div class="row" style="margin:0 0 8px"><button class="p" id="back">Done</button></div>
     <label class="s">Range ball boost (%)<input type="number" id="boost" step="0.5" style="width:80px;font:inherit;padding:6px;border:1px solid var(--ink);border-radius:4px;text-align:right"></label>
     <label class="s">Theme<select id="theme"><option value="auto">Auto</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
+    <label class="s">Lay-up leaves me a full<select id="layClub"></select></label>
     <div class="meta">Carry yards at the range, per club. Real balls go further by the boost above.</div>
     <div id="clubs"></div>
     <div class="meta" style="margin-top:14px"><b>Shot log</b> (walked distance, so it includes roll)</div>
@@ -475,13 +478,13 @@ function update(){
   }else if(greenMarker){map.removeLayer(greenMarker);greenMarker=null}
   if(greenLine){map.removeLayer(greenLine);greenLine=null}
   if(aimLine){map.removeLayer(aimLine);aimLine=null}
-  if(!me){$("tag").textContent="";$("club").textContent="–";$("plays").textContent="Waiting for GPS";$("meta").textContent="Allow location when Safari asks, or long-press the map to set a test position.";$("alt").textContent="";$("haz").textContent="";return}
+  if(!me){clearLay();$("tag").textContent="";$("club").textContent="–";$("plays").textContent="Waiting for GPS";$("meta").textContent="Allow location when Safari asks, or long-press the map to set a test position.";$("alt").textContent="";$("haz").textContent="";return}
   if(g)greenLine=L.polyline([me,g.c],{color:"#fff",weight:2,dashArray:"6 6",interactive:false}).addTo(map);
   if(aim)aimLine=L.polyline([me,aim],{color:"#ffd23f",weight:2,dashArray:"2 6",interactive:false}).addTo(map);
 
   const tgt=aim||(g&&g.c);
   if(!tgt){
-    $("tag").textContent="";$("club").textContent="–";$("plays").textContent="No target";
+    clearLay();$("tag").textContent="";$("club").textContent="–";$("plays").textContent="No target";
     $("meta").textContent=[note,toast].filter(Boolean).join(" · ")||"Tap the map to set an aim point.";$("alt").textContent="";$("haz").textContent="";
     return;
   }
@@ -509,9 +512,66 @@ function update(){
   const nm=h=>(h.kind==="bunker"?"Bunker":"Water")+` ${Math.round(h.from)}–${Math.round(h.to)}`;
   const risky=hz.find(h=>carryReal>=h.from-8&&carryReal<=h.to+8);
   $("haz").textContent=hz.length?"On the line: "+hz.slice(0,4).map(nm).join(" · ")+" yd"+(risky?` · ${best[0]} carry ~${Math.round(carryReal)} yd is close to the ${risky.kind==="bunker"?"bunker":"water"}`:""):"";
+  layupAdvice(p,g,clubs,best,risky);
   const up=clubs[i-1],dn=clubs[i+1];
   $("alt").textContent=`Carry ${Math.round(best[1])}`+(up?` · longer: ${up[0]} ${Math.round(up[1])}`:"")+(dn?` · shorter: ${dn[0]} ${Math.round(dn[1])}`:"");
 }
+
+
+// Lay-up advice: when the green is out of reach, or the shot to it lands near a hazard well short of the green,
+// pick the club that leaves your chosen full approach shot, landing clear of bunkers and water.
+let layMarker=null,layPt=null;
+function pathTo(g){   // from you to the green, following the hole line (so doglegs are respected)
+  let pts=[me];
+  if(cur!==null&&holes[cur]&&holes[cur].pts.length>1){
+    const h=holes[cur],xy=h.pts.map(q=>toXY(q,me));let bi=0,bd=1e9;
+    for(let i=0;i<xy.length-1;i++){const d=segDist(xy[i],xy[i+1]);if(d<bd){bd=d;bi=i}}
+    pts=pts.concat(h.pts.slice(bi+1));
+  }
+  if(dist(pts[pts.length-1],g.c)>8)pts.push(g.c);
+  return pts;
+}
+function along(pts,d){let acc=0;for(let i=0;i<pts.length-1;i++){const l=dist(pts[i],pts[i+1]);if(acc+l>=d){const t=(d-acc)/l;return{lat:pts[i].lat+(pts[i+1].lat-pts[i].lat)*t,lng:pts[i].lng+(pts[i+1].lng-pts[i].lng)*t}}acc+=l}return null}
+function pathLen(pts){let a=0;for(let i=0;i<pts.length-1;i++)a+=dist(pts[i],pts[i+1]);return a}
+function hazardAt(pt){for(const h of hazards){const bb=h.bb;if(pt.lat<bb.s||pt.lat>bb.n||pt.lng<bb.w||pt.lng>bb.e)continue;if(inPoly(pt,h.pts))return h}return null}
+function clearLay(){if(layMarker){map.removeLayer(layMarker);layMarker=null}layPt=null;$("layrow").style.display="none"}
+function layupAdvice(p,g,clubs,best,risky){
+  if(aim||!g||!clubs.length){clearLay();return}
+  const par=cur!==null&&holes[cur]?parseInt(holes[cur].par):NaN;
+  if(par===3){clearLay();return}                                   // par 3: just hit the green
+  const reach=clubs[0][1];
+  const out=p.adj>reach*1.02;                                      // longest club cannot get there
+  const front=risky&&risky.to<p.d-40&&risky.from>20;               // hazard well short of the green sits where the shot lands
+  if(!out&&!front){clearLay();return}
+  const k=p.d/p.adj;                                               // real yards per playing yard (wind, height)
+  const path=pathTo(g),total=pathLen(path);
+  const acName=(S.layClub&&S.bag[S.layClub])?S.layClub:(S.bag.PW?"PW":Object.keys(S.bag).slice(-4)[0]);
+  const T=S.bag[acName]*(1+S.boost/100);                           // the full approach we want to leave
+  let choice=null;
+  for(const c of clubs){
+    const Lr=c[1]*k;
+    if(Lr<40||Lr>total-30)continue;                                // too short to matter, or basically going for it
+    if(front&&Lr>risky.from-10)continue;                           // stay short of that hazard
+    const pt=along(path,Lr);if(!pt)continue;
+    const pts3=[along(path,Math.max(0,Lr-10)),pt,along(path,Math.min(total,Lr+10))].filter(Boolean);
+    const bad=pts3.map(hazardAt).find(Boolean);
+    const rem=dist(pt,g.c)*(p.adj/p.d);
+    const score=Math.abs(rem-T)+(bad?250:0);
+    if(!choice||score<choice.score)choice={club:c[0],Lr,pt,rem,score,bad};
+  }
+  if(!choice||choice.club===best[0]&&out){clearLay();return}
+  layPt=choice.pt;
+  if(!layMarker){
+    layMarker=L.marker(layPt,{icon:L.divIcon({className:"",html:'<div class="lay" style="width:14px;height:14px"></div>',iconSize:[14,14],iconAnchor:[7,7]})}).addTo(map);
+    layMarker.on("click",()=>{if(layPt)setAim(layPt)});
+  }else layMarker.setLatLng(layPt);
+  const why=out?`Green is out of reach (plays ${Math.round(p.adj)}, ${clubs[0][0]} carries ${Math.round(reach)}).`
+                :`${risky.kind==="bunker"?"Bunker":"Water"} ${Math.round(risky.from)}–${Math.round(risky.to)} yd is where ${best[0]} lands.`;
+  const left=Math.round(choice.rem),near=Math.abs(choice.rem-T)<=12;
+  $("lay").textContent=`${why} Lay-up: ${choice.club} (carry ~${Math.round(choice.Lr)}), leaves ~${left}${near?" - a full "+acName:""}.`+(choice.bad?` Check the landing area, ${choice.bad.kind==="bunker"?"bunker":"water"} nearby.`:"");
+  $("layrow").style.display="";
+}
+$("layBtn").onclick=()=>{if(layPt)setAim(layPt)};
 
 // Hazards on the shot line
 function inPoly(p,pts){let c=false;for(let i=0,j=pts.length-1;i<pts.length;j=i++){const a=pts[i],b=pts[j];if((a.lat>p.lat)!==(b.lat>p.lat)&&p.lng<(b.lng-a.lng)*(p.lat-a.lat)/(b.lat-a.lat)+a.lng)c=!c}return c}
@@ -631,7 +691,9 @@ $("impApply").onclick=()=>{
 };
 
 // Bag editor
+function fillLayClub(){const sel=$("layClub");sel.innerHTML=Object.keys(S.bag).filter(n=>n!=="Driver").map(n=>`<option>${n}</option>`).join("");sel.value=(S.layClub&&S.bag[S.layClub])?S.layClub:(S.bag.PW?"PW":sel.options[0]?sel.options[0].value:"")}
 function drawBag(){
+  fillLayClub();
   $("theme").value=S.theme||"auto";
   drawShots();
   $("boost").value=S.boost;
@@ -647,6 +709,7 @@ function applyTheme(){const t=S.theme||"auto";if(t==="auto")delete document.docu
 applyTheme();
 $("theme").onchange=e=>{S.theme=e.target.value;save();applyTheme()};
 fillClubSelect();
+$("layClub").onchange=e=>{S.layClub=e.target.value;save();update()};
 $("boost").onchange=e=>{S.boost=+e.target.value||0;save();update()};
 $("bagBtn").onclick=()=>{drawBag();$("play").style.display="none";$("bag").style.display="block"};
 $("back").onclick=()=>{$("bag").style.display="none";$("play").style.display="block";map.invalidateSize()};
