@@ -4,10 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Club">
+<meta name="apple-mobile-web-app-title" content="Tour Caddie">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#253c2c">
-<title>Club</title>
+<title>Tour Caddie</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800&display=swap" rel="stylesheet">
 <style>
@@ -65,12 +66,14 @@ select{font:inherit;font-weight:600;padding:9px;border:2px solid var(--bord);bor
     <div class="meta" id="meta">Allow location when Safari asks.</div>
     <div class="alt" id="alt"></div>
     <div class="meta" id="haz"></div>
+    <div class="meta" id="plan" style="display:none;white-space:pre-line"></div>
     <div class="meta" id="layrow" style="display:none"><span id="lay"></span> <button id="layBtn" style="padding:4px 10px;margin-left:4px">Aim there</button></div>
     <div class="row" id="shotrow"><select id="shotClub"></select><button class="p" id="shotBtn">Start shot</button><button id="shotX" style="display:none">Cancel</button></div>
     <div class="row"><button class="p" id="find">Find hole</button><button id="clear">Clear aim</button><button id="rotBtn">Rotate: off</button><button id="followBtn">Follow: on</button><button id="bagBtn">Bag and settings</button></div>
   </div>
   <div id="bag">
     <div class="row" style="margin:0 0 8px"><button class="p" id="back">Done</button></div>
+    <img src="logo-app.png" alt="Tour Caddie" style="width:100%;border-radius:8px;margin:2px 0 10px;display:block">
     <label class="s">Range ball boost (%)<input type="number" id="boost" step="0.5" style="width:80px;font:inherit;padding:6px;border:1px solid var(--ink);border-radius:4px;text-align:right"></label>
     <label class="s">Theme<select id="theme"><option value="auto">Auto</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
     <label class="s">Colour scheme<select id="scheme"><option value="fairway">Fairway (green and gold)</option><option value="vale">Vale Royal (burgundy)</option><option value="jungle">Jungle (green and peach)</option></select></label>
@@ -80,11 +83,15 @@ select{font:inherit;font-weight:600;padding:9px;border:2px solid var(--bord);bor
     <div class="meta" style="margin-top:14px"><b>Shot log</b> (walked distance, so it includes roll)</div>
     <div id="shotstats" class="meta"></div>
     <div class="row"><button id="shotClear">Clear shot log</button></div>
+    <div class="meta" style="margin-top:14px"><b>Offline map</b> (satellite tiles for the course that is loaded now)</div>
+    <div class="row"><button id="offDl">Save course for offline</button><button id="offClr">Clear</button></div>
+    <div class="meta" id="offOut"></div>
     <div class="meta" style="margin-top:14px"><b>Import range session</b> (CSV export)</div>
     <input type="file" id="impFile" accept=".csv,.txt,text/csv,text/plain">
     <textarea id="impText" rows="4" placeholder="…or paste the CSV here" style="width:100%;font:inherit;margin-top:6px"></textarea>
     <div class="row"><button id="impPrev">Preview</button><button class="p" id="impApply" style="display:none">Apply to bag</button></div>
     <div class="meta" id="impOut"></div>
+    <div class="meta" id="ver" style="margin-top:16px;text-align:center"></div>
   </div>
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
@@ -468,6 +475,7 @@ function plays(pt){
 }
 
 function update(){
+  $("plan").style.display="none";
   pickHole();
   // hole label and hole line
   holeLayer.clearLayers();
@@ -521,11 +529,43 @@ function update(){
   const nm=h=>(h.kind==="bunker"?"Bunker":"Water")+` ${Math.round(h.from)}–${Math.round(h.to)}`;
   const risky=hz.find(h=>carryReal>=h.from-8&&carryReal<=h.to+8);
   $("haz").textContent=hz.length?"On the line: "+hz.slice(0,4).map(nm).join(" · ")+" yd"+(risky?` · ${best[0]} carry ~${Math.round(carryReal)} yd is close to the ${risky.kind==="bunker"?"bunker":"water"}`:""):"";
-  layupAdvice(p,g,clubs,best,risky);
+  const plan=planHole(p,g,clubs);
+  layupAdvice(p,g,clubs,best,risky,!!plan&&plan.v==="Lay up");
   const up=clubs[i-1],dn=clubs[i+1];
   $("alt").textContent=`Carry ${Math.round(best[1])}`+(up?` · longer: ${up[0]} ${Math.round(up[1])}`:"")+(dn?` · shorter: ${dn[0]} ${Math.round(dn[1])}`:"");
 }
 
+
+
+// Par 5 planner: the carry needed to clear each hazard, plus rough odds of going for the green or laying up.
+// Odds assume your carry varies by about 6% either way, so treat them as a guide, not a promise.
+const PHI=z=>{const t=1/(1+0.2316419*Math.abs(z)),d=0.3989423*Math.exp(-z*z/2),q=d*t*(0.3193815+t*(-0.3565638+t*(1.781478+t*(-1.821256+t*1.330274))));return z>0?1-q:q};
+function planHole(p,g,clubs){
+  const el=$("plan");el.style.display="none";
+  const h=cur!==null?holes[cur]:null,par=h?parseInt(h.par):NaN;
+  if(aim||!g||!h||!clubs.length)return null;
+  if(!(par===5||(isNaN(par)&&pathLen(h.pts)>=430)))return null;
+  const reach=clubs[0][1];
+  if(p.adj>reach*1.3||p.adj<reach*0.75)return null;                // not a decision yet (tee shot) or just a normal approach
+  const k=p.d/p.adj;
+  const ds=g.pts.map(q=>dist(me,q)),frontReal=Math.min(...ds),frontAdj=frontReal/k;
+  const enough=clubs.filter(c=>c[1]>=frontAdj*0.97),go=enough.length?enough[enough.length-1]:clubs[0];
+  const mu=go[1],sg=mu*0.06;
+  const pReach=1-PHI((frontAdj-mu)/sg);
+  const hz=hazardsOnLine(me,g.c).filter(x=>x.from>20&&x.to<=frontReal+40);
+  const mr=mu*k,sr=sg*k;let pW=0,pB=0;
+  for(const x of hz){if(x.to>frontReal+3)continue;const pr=PHI((x.to-mr)/sr)-PHI((x.from-mr)/sr);if(x.kind==="water")pW+=pr;else pB+=pr}
+  const pH=pW+pB;
+  let v;
+  if(pReach<0.15||pW>0.12||pH>0.3)v="Lay up";else if(pReach>=0.4)v="Go for it";else v="Your call";
+  const pc=x=>Math.round(Math.min(1,x)*100);
+  let t=`Par 5: ${v}. About ${pc(pReach)}% to reach with ${go[0]}`+(pH>=0.05?`, ${pc(pH)}% ends in ${pW>=pB?"water":"a bunker"}`:"")+".";
+  const cl=hz.slice(0,3).map(x=>{const need=Math.ceil(x.to+3),c=clubs.filter(c=>c[1]*k>=need),cc=c.length?c[c.length-1]:null;
+    return `${x.kind==="bunker"?"Bunker":"Water"} ${Math.round(x.from)}–${Math.round(x.to)}: carry ${need}`+(cc?` (${cc[0]})`:" (no club clears it)")});
+  if(cl.length)t+="\nTo clear: "+cl.join(" · ");
+  el.textContent=t;el.style.display="";
+  return {v,pReach,pH};
+}
 
 // Lay-up advice: when the green is out of reach, or the shot to it lands near a hazard well short of the green,
 // pick the club that leaves your chosen full approach shot, landing clear of bunkers and water.
@@ -544,14 +584,14 @@ function along(pts,d){let acc=0;for(let i=0;i<pts.length-1;i++){const l=dist(pts
 function pathLen(pts){let a=0;for(let i=0;i<pts.length-1;i++)a+=dist(pts[i],pts[i+1]);return a}
 function hazardAt(pt){for(const h of hazards){const bb=h.bb;if(pt.lat<bb.s||pt.lat>bb.n||pt.lng<bb.w||pt.lng>bb.e)continue;if(inPoly(pt,h.pts))return h}return null}
 function clearLay(){if(layMarker){map.removeLayer(layMarker);layMarker=null}layPt=null;$("layrow").style.display="none"}
-function layupAdvice(p,g,clubs,best,risky){
+function layupAdvice(p,g,clubs,best,risky,force){
   if(aim||!g||!clubs.length){clearLay();return}
   const par=cur!==null&&holes[cur]?parseInt(holes[cur].par):NaN;
   if(par===3){clearLay();return}                                   // par 3: just hit the green
   const reach=clubs[0][1];
   const out=p.adj>reach*1.02;                                      // longest club cannot get there
   const front=risky&&risky.to<p.d-40&&risky.from>20;               // hazard well short of the green sits where the shot lands
-  if(!out&&!front){clearLay();return}
+  if(!out&&!front&&!force){clearLay();return}
   const k=p.d/p.adj;                                               // real yards per playing yard (wind, height)
   const path=pathTo(g),total=pathLen(path);
   const acName=(S.layClub&&S.bag[S.layClub])?S.layClub:(S.bag.PW?"PW":Object.keys(S.bag).slice(-4)[0]);
@@ -568,13 +608,13 @@ function layupAdvice(p,g,clubs,best,risky){
     const score=Math.abs(rem-T)+(bad?250:0);
     if(!choice||score<choice.score)choice={club:c[0],Lr,pt,rem,score,bad};
   }
-  if(!choice||choice.club===best[0]&&out){clearLay();return}
+  if(!choice||choice.club===best[0]&&out&&!force){clearLay();return}
   layPt=choice.pt;
   if(!layMarker){
     layMarker=L.marker(layPt,{icon:L.divIcon({className:"",html:'<div class="lay" style="width:14px;height:14px"></div>',iconSize:[14,14],iconAnchor:[7,7]})}).addTo(map);
     layMarker.on("click",()=>{if(layPt)setAim(layPt)});
   }else layMarker.setLatLng(layPt);
-  const why=out?`Green is out of reach (plays ${Math.round(p.adj)}, ${clubs[0][0]} carries ${Math.round(reach)}).`
+  const why=(!out&&!front)?"Laying up.":out?`Green is out of reach (plays ${Math.round(p.adj)}, ${clubs[0][0]} carries ${Math.round(reach)}).`
                 :`${risky.kind==="bunker"?"Bunker":"Water"} ${Math.round(risky.from)}–${Math.round(risky.to)} yd is where ${best[0]} lands.`;
   const left=Math.round(choice.rem),near=Math.abs(choice.rem-T)<=12;
   $("lay").textContent=`${why} Lay-up: ${choice.club} (carry ~${Math.round(choice.Lr)}), leaves ~${left}${near?" - a full "+acName:""}.`+(choice.bad?` Check the landing area, ${choice.bad.kind==="bunker"?"bunker":"water"} nearby.`:"");
@@ -700,9 +740,69 @@ $("impApply").onclick=()=>{
 };
 
 // Bag editor
+
+// Offline map: saves the satellite tiles for the loaded course on the phone (wide view at low zoom, close view along the holes)
+const TILE_HOST="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/";
+const tileUrl=(z,x,y)=>TILE_HOST+z+"/"+y+"/"+x;
+const tileX=(lng,z)=>Math.floor((lng+180)/360*Math.pow(2,z));
+const tileY=(lat,z)=>{const r=rad(lat);return Math.floor((1-Math.log(Math.tan(r)+1/Math.cos(r))/Math.PI)/2*Math.pow(2,z))};
+function courseTiles(){
+  const all=[];
+  holes.forEach(h=>h.pts.forEach(q=>all.push(q)));greens.forEach(g=>g.pts.forEach(q=>all.push(q)));hazards.forEach(h=>h.pts.forEach(q=>all.push(q)));
+  if(!all.length)return null;
+  const la=all.map(q=>q.lat),ln=all.map(q=>q.lng);
+  const n=Math.max(...la)+0.0015,s=Math.min(...la)-0.0015,e=Math.max(...ln)+0.0025,w=Math.min(...ln)-0.0025;
+  const set=new Map(),add=(z,x,y)=>set.set(z+"/"+x+"/"+y,[z,x,y]);
+  for(const z of [15,16,17])for(let x=tileX(w,z);x<=tileX(e,z);x++)for(let y=tileY(n,z);y<=tileY(s,z);y++)add(z,x,y);
+  const samples=[];
+  holes.forEach(h=>{for(let i=0;i<h.pts.length-1;i++){const a=h.pts[i],b=h.pts[i+1],m=Math.max(1,Math.ceil(dist(a,b)/15));for(let j=0;j<=m;j++){const t=j/m;samples.push({lat:a.lat+(b.lat-a.lat)*t,lng:a.lng+(b.lng-a.lng)*t})}}});
+  greens.forEach(g=>g.pts.forEach(q=>samples.push(q)));
+  for(const z of [18,19])for(const q of samples){const x=tileX(q.lng,z),y=tileY(q.lat,z);for(let dx=-1;dx<=1;dx++)for(let dy=-1;dy<=1;dy++)add(z,x+dx,y+dy)}
+  return [...set.values()];
+}
+const offOut=t=>{$("offOut").textContent=t};
+async function offlineCount(){
+  if(!("caches" in window)){offOut("This browser cannot store maps offline.");return}
+  try{const c=await caches.open("tiles-v1"),k=await c.keys();offOut(k.length?`${k.length} map tiles saved on this phone.`:"No offline maps saved yet. Load the course first (be on it, or long-press the map there), then tap Save.")}catch(e){}
+}
+let offBusy=false;
+async function offlineSave(){
+  if(offBusy)return;
+  if(!("caches" in window)){offOut("This browser cannot store maps offline.");return}
+  const t=courseTiles();
+  if(!t){offOut("Load the course first: be on it, or long-press the map there to set a test position.");return}
+  if(!confirm(`Save ${t.length} map tiles (roughly ${Math.max(1,Math.round(t.length*0.025))} MB) for offline use? Best done on wifi.`))return;
+  offBusy=true;
+  const c=await caches.open("tiles-v1");let done=0,fail=0,i=0;
+  const work=async()=>{
+    while(i<t.length){
+      const [z,x,y]=t[i++],u=tileUrl(z,x,y);
+      try{
+        if(!(await c.match(u,{ignoreVary:true}))){
+          let r;try{r=await fetch(u)}catch(e){r=await fetch(u,{mode:"no-cors"})}
+          if(r.ok||r.type==="opaque")await c.put(u,r);else fail++;
+        }
+      }catch(e){fail++}
+      done++;if(done%25===0||done===t.length)offOut(`Saving ${done} of ${t.length}...`);
+    }
+  };
+  await Promise.all(Array.from({length:6},work));
+  offBusy=false;
+  offOut(fail?`Saved ${t.length-fail} of ${t.length} tiles. ${fail} failed, so tap Save again with a better signal.`:`Done. ${t.length} tiles saved. The course map now works without signal.`);
+}
+async function offlineClear(){
+  if(!confirm("Remove all saved offline map tiles?"))return;
+  try{await caches.delete("tiles-v1")}catch(e){}
+  offlineCount();
+}
+$("offDl").onclick=offlineSave;
+$("offClr").onclick=offlineClear;
+const APP_VERSION="1.3 (13 Nov 2026)";
+$("ver").textContent="Tour Caddie v"+APP_VERSION;
 function fillLayClub(){const sel=$("layClub");sel.innerHTML=Object.keys(S.bag).filter(n=>n!=="Driver").map(n=>`<option>${n}</option>`).join("");sel.value=(S.layClub&&S.bag[S.layClub])?S.layClub:(S.bag.PW?"PW":sel.options[0]?sel.options[0].value:"")}
 function drawBag(){
   fillLayClub();
+  offlineCount();
   $("theme").value=S.theme||"auto";
   $("scheme").value=S.scheme||"fairway";
   drawShots();
