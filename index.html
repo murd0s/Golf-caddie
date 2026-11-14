@@ -78,6 +78,7 @@ select{font:inherit;font-weight:600;padding:9px;border:2px solid var(--bord);bor
     <label class="s">Theme<select id="theme"><option value="auto">Auto</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
     <label class="s">Map imagery<select id="imagery"><option value="std">Standard (Esri)</option><option value="clarity">Clarity (Esri, can be sharper)</option><option value="mapbox">Mapbox satellite (needs a free token)</option></select></label>
     <label class="s">Mapbox token<input id="mbTok" type="text" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Paste your public token (starts pk.)" style="min-width:0;flex:1"></label>
+    <div class="meta" id="mbMsg"></div>
     <label class="s">Sharper map<select id="sharp"><option value="on">On (uses more data)</option><option value="off">Off</option></select></label>
     <label class="s">Colour scheme<select id="scheme"><option value="fairway">Fairway (green and gold)</option><option value="vale">Vale Royal (burgundy)</option><option value="jungle">Jungle (green and peach)</option></select></label>
     <label class="s">Lay-up leaves me a full<select id="layClub"></select></label>
@@ -112,19 +113,40 @@ const YD=1.09361, R=6371000, rad=d=>d*Math.PI/180;
 // Map
 const map=L.map("map",{zoomControl:false,maxZoom:20,rotate:true,rotateControl:false,touchRotate:false,shiftKeyRotate:false,pitchDrag:false}).setView([53.2465,-2.5755],16);
 const IMG={std:"https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/",clarity:"https://clarity.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/"};
-let baseLayer=null;
-// Sharper map: on high-density screens (iPhones) ask for the next zoom level up and draw each tile at half size, so the picture is about twice as crisp at the usual zoom.
+let baseLayer=null,baseSeq=0;
+const mbNote=t=>{const el=$("mbMsg");if(el)el.textContent=t};
+function esriLayer(){
+  // Sharper map: on high-density screens (iPhones) ask for the next zoom level up and draw each tile at half size, so the picture is about twice as crisp at the usual zoom.
+  const sharp=S.sharp!==false&&(window.devicePixelRatio||1)>1.5,src=IMG[S.imagery]||IMG.std;
+  return L.tileLayer(src+"{z}/{y}/{x}",sharp?{detectRetina:true,maxZoom:21,maxNativeZoom:18,attribution:"Esri"}:{maxZoom:20,maxNativeZoom:19,attribution:"Esri"});
+}
+// Checks the Mapbox token with one test tile, so a bad token or URL restriction shows a message instead of a blank map.
+async function mapboxCheck(){
+  const t=S.mbToken||"";
+  if(!t.startsWith("pk."))return{ok:false,msg:t.startsWith("sk.")?"That is a secret token (sk.). Mapbox needs a public token that starts pk.":"That does not look like a Mapbox public token (it should start pk.)."};
+  try{
+    const r=await fetch("https://api.mapbox.com/v4/mapbox.satellite/12/2018/1329.jpg90?access_token="+encodeURIComponent(t));
+    if(r.ok)return{ok:true};
+    if(r.status===401)return{ok:false,msg:"Mapbox says the token is not valid (401). Check it was copied in full."};
+    if(r.status===403)return{ok:false,msg:"Mapbox refused the token (403). Its URL restriction probably does not match this site. Allow https://murd0s.github.io/ or remove the restriction to test."};
+    return{ok:false,msg:"Mapbox returned error "+r.status+"."};
+  }catch(e){return{ok:false,msg:"Could not reach Mapbox. Check your signal and try again."}}
+}
 function setBase(){
+  const my=++baseSeq;
   if(baseLayer)map.removeLayer(baseLayer);
-  const sharp=S.sharp!==false&&(window.devicePixelRatio||1)>1.5;
-  if(S.imagery==="mapbox"&&S.mbToken){
-    // Mapbox Satellite: 512px images drawn at 256, so already sharp on iPhone screens. Your token is kept only on this phone.
+  baseLayer=esriLayer().addTo(map);baseLayer.bringToBack();     // always show Esri straight away so the map is never blank
+  if(S.imagery!=="mapbox"){mbNote("");return}
+  if(!S.mbToken){mbNote("Paste a Mapbox public token (starts pk.) to use Mapbox. Showing Esri for now.");return}
+  mbNote("Checking Mapbox token...");
+  mapboxCheck().then(r=>{
+    if(my!==baseSeq)return;
+    if(!r.ok){mbNote(r.msg+" Showing Esri for now.");return}
+    map.removeLayer(baseLayer);
     baseLayer=L.tileLayer("https://api.mapbox.com/v4/mapbox.satellite/{z}/{x}/{y}@2x.jpg90?access_token="+encodeURIComponent(S.mbToken),{maxZoom:21,maxNativeZoom:20,attribution:"Mapbox, Maxar"}).addTo(map);
-  }else{
-    const src=IMG[S.imagery]||IMG.std;
-    baseLayer=L.tileLayer(src+"{z}/{y}/{x}",sharp?{detectRetina:true,maxZoom:21,maxNativeZoom:18,attribution:"Esri"}:{maxZoom:20,maxNativeZoom:19,attribution:"Esri"}).addTo(map);
-  }
-  baseLayer.bringToBack();
+    baseLayer.bringToBack();
+    mbNote("Mapbox is working.");
+  });
 }
 setBase();
 const overlay=L.layerGroup().addTo(map), holeLayer=L.layerGroup().addTo(map);
@@ -815,7 +837,7 @@ async function offlineClear(){
 }
 $("offDl").onclick=offlineSave;
 $("offClr").onclick=offlineClear;
-const APP_VERSION="1.5 (14 Nov 2026)";
+const APP_VERSION="1.6 (14 Nov 2026)";
 $("ver").textContent="Tour Caddie v"+APP_VERSION;
 function fillLayClub(){const sel=$("layClub");sel.innerHTML=Object.keys(S.bag).filter(n=>n!=="Driver").map(n=>`<option>${n}</option>`).join("");sel.value=(S.layClub&&S.bag[S.layClub])?S.layClub:(S.bag.PW?"PW":sel.options[0]?sel.options[0].value:"")}
 function drawBag(){
