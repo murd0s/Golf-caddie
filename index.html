@@ -76,6 +76,8 @@ select{font:inherit;font-weight:600;padding:9px;border:2px solid var(--bord);bor
     <img src="logo-app.png" alt="Tour Caddie" style="width:100%;border-radius:8px;margin:2px 0 10px;display:block">
     <label class="s">Range ball boost (%)<input type="number" id="boost" step="0.5" style="width:80px;font:inherit;padding:6px;border:1px solid var(--ink);border-radius:4px;text-align:right"></label>
     <label class="s">Theme<select id="theme"><option value="auto">Auto</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
+    <label class="s">Map imagery<select id="imagery"><option value="std">Standard (Esri)</option><option value="clarity">Clarity (Esri, can be sharper)</option></select></label>
+    <label class="s">Sharper map<select id="sharp"><option value="on">On (uses more data)</option><option value="off">Off</option></select></label>
     <label class="s">Colour scheme<select id="scheme"><option value="fairway">Fairway (green and gold)</option><option value="vale">Vale Royal (burgundy)</option><option value="jungle">Jungle (green and peach)</option></select></label>
     <label class="s">Lay-up leaves me a full<select id="layClub"></select></label>
     <div class="meta">Carry yards at the range, per club. Real balls go further by the boost above.</div>
@@ -108,7 +110,17 @@ const YD=1.09361, R=6371000, rad=d=>d*Math.PI/180;
 
 // Map
 const map=L.map("map",{zoomControl:false,maxZoom:20,rotate:true,rotateControl:false,touchRotate:false,shiftKeyRotate:false,pitchDrag:false}).setView([53.2465,-2.5755],16);
-L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",{maxZoom:20,maxNativeZoom:19,attribution:"Esri"}).addTo(map);
+const IMG={std:"https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/",clarity:"https://clarity.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/"};
+let baseLayer=null;
+// Sharper map: on high-density screens (iPhones) ask for the next zoom level up and draw each tile at half size, so the picture is about twice as crisp at the usual zoom.
+function setBase(){
+  if(baseLayer)map.removeLayer(baseLayer);
+  const sharp=S.sharp!==false&&(window.devicePixelRatio||1)>1.5;
+  const src=IMG[S.imagery]||IMG.std;
+  baseLayer=L.tileLayer(src+"{z}/{y}/{x}",sharp?{detectRetina:true,maxZoom:21,maxNativeZoom:18,attribution:"Esri"}:{maxZoom:20,maxNativeZoom:19,attribution:"Esri"}).addTo(map);
+  baseLayer.bringToBack();
+}
+setBase();
 const overlay=L.layerGroup().addTo(map), holeLayer=L.layerGroup().addTo(map);
 // Wind badge: the arrow points the way the wind is blowing (it turns with the map when Rotate is on)
 const windCtl=L.control({position:"topright"});
@@ -742,8 +754,7 @@ $("impApply").onclick=()=>{
 // Bag editor
 
 // Offline map: saves the satellite tiles for the loaded course on the phone (wide view at low zoom, close view along the holes)
-const TILE_HOST="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/";
-const tileUrl=(z,x,y)=>TILE_HOST+z+"/"+y+"/"+x;
+const tileUrl=(z,x,y)=>(IMG[S.imagery]||IMG.std)+z+"/"+y+"/"+x;
 const tileX=(lng,z)=>Math.floor((lng+180)/360*Math.pow(2,z));
 const tileY=(lat,z)=>{const r=rad(lat);return Math.floor((1-Math.log(Math.tan(r)+1/Math.cos(r))/Math.PI)/2*Math.pow(2,z))};
 function courseTiles(){
@@ -757,7 +768,7 @@ function courseTiles(){
   const samples=[];
   holes.forEach(h=>{for(let i=0;i<h.pts.length-1;i++){const a=h.pts[i],b=h.pts[i+1],m=Math.max(1,Math.ceil(dist(a,b)/15));for(let j=0;j<=m;j++){const t=j/m;samples.push({lat:a.lat+(b.lat-a.lat)*t,lng:a.lng+(b.lng-a.lng)*t})}}});
   greens.forEach(g=>g.pts.forEach(q=>samples.push(q)));
-  for(const z of [18,19])for(const q of samples){const x=tileX(q.lng,z),y=tileY(q.lat,z);for(let dx=-1;dx<=1;dx++)for(let dy=-1;dy<=1;dy++)add(z,x+dx,y+dy)}
+  for(const z of [18,19]){const r=z===19?2:1;for(const q of samples){const x=tileX(q.lng,z),y=tileY(q.lat,z);for(let dx=-r;dx<=r;dx++)for(let dy=-r;dy<=r;dy++)add(z,x+dx,y+dy)}}
   return [...set.values()];
 }
 const offOut=t=>{$("offOut").textContent=t};
@@ -771,7 +782,7 @@ async function offlineSave(){
   if(!("caches" in window)){offOut("This browser cannot store maps offline.");return}
   const t=courseTiles();
   if(!t){offOut("Load the course first: be on it, or long-press the map there to set a test position.");return}
-  if(!confirm(`Save ${t.length} map tiles (roughly ${Math.max(1,Math.round(t.length*0.025))} MB) for offline use? Best done on wifi.`))return;
+  if(!confirm(`Save ${t.length} map tiles (roughly ${Math.max(1,Math.round(t.length*0.025))} MB) for offline use, using the imagery chosen in settings? Best done on wifi.`))return;
   offBusy=true;
   const c=await caches.open("tiles-v1");let done=0,fail=0,i=0;
   const work=async()=>{
@@ -797,7 +808,7 @@ async function offlineClear(){
 }
 $("offDl").onclick=offlineSave;
 $("offClr").onclick=offlineClear;
-const APP_VERSION="1.3 (13 Nov 2026)";
+const APP_VERSION="1.4 (14 Nov 2026)";
 $("ver").textContent="Tour Caddie v"+APP_VERSION;
 function fillLayClub(){const sel=$("layClub");sel.innerHTML=Object.keys(S.bag).filter(n=>n!=="Driver").map(n=>`<option>${n}</option>`).join("");sel.value=(S.layClub&&S.bag[S.layClub])?S.layClub:(S.bag.PW?"PW":sel.options[0]?sel.options[0].value:"")}
 function drawBag(){
@@ -805,6 +816,8 @@ function drawBag(){
   offlineCount();
   $("theme").value=S.theme||"auto";
   $("scheme").value=S.scheme||"fairway";
+  $("imagery").value=S.imagery||"std";
+  $("sharp").value=S.sharp===false?"off":"on";
   drawShots();
   $("boost").value=S.boost;
   $("clubs").innerHTML="";
@@ -824,6 +837,8 @@ function applyTheme(){
 }
 applyTheme();
 $("theme").onchange=e=>{S.theme=e.target.value;save();applyTheme()};
+$("imagery").onchange=e=>{S.imagery=e.target.value;save();setBase()};
+$("sharp").onchange=e=>{S.sharp=e.target.value==="on";save();setBase()};
 $("scheme").onchange=e=>{S.scheme=e.target.value;save();applyTheme()};
 fillClubSelect();
 $("layClub").onchange=e=>{S.layClub=e.target.value;save();update()};
