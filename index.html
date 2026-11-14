@@ -76,7 +76,8 @@ select{font:inherit;font-weight:600;padding:9px;border:2px solid var(--bord);bor
     <img src="logo-app.png" alt="Tour Caddie" style="width:100%;border-radius:8px;margin:2px 0 10px;display:block">
     <label class="s">Range ball boost (%)<input type="number" id="boost" step="0.5" style="width:80px;font:inherit;padding:6px;border:1px solid var(--ink);border-radius:4px;text-align:right"></label>
     <label class="s">Theme<select id="theme"><option value="auto">Auto</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
-    <label class="s">Map imagery<select id="imagery"><option value="std">Standard (Esri)</option><option value="clarity">Clarity (Esri, can be sharper)</option></select></label>
+    <label class="s">Map imagery<select id="imagery"><option value="std">Standard (Esri)</option><option value="clarity">Clarity (Esri, can be sharper)</option><option value="mapbox">Mapbox satellite (needs a free token)</option></select></label>
+    <label class="s">Mapbox token<input id="mbTok" type="text" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Paste your public token (starts pk.)" style="min-width:0;flex:1"></label>
     <label class="s">Sharper map<select id="sharp"><option value="on">On (uses more data)</option><option value="off">Off</option></select></label>
     <label class="s">Colour scheme<select id="scheme"><option value="fairway">Fairway (green and gold)</option><option value="vale">Vale Royal (burgundy)</option><option value="jungle">Jungle (green and peach)</option></select></label>
     <label class="s">Lay-up leaves me a full<select id="layClub"></select></label>
@@ -116,8 +117,13 @@ let baseLayer=null;
 function setBase(){
   if(baseLayer)map.removeLayer(baseLayer);
   const sharp=S.sharp!==false&&(window.devicePixelRatio||1)>1.5;
-  const src=IMG[S.imagery]||IMG.std;
-  baseLayer=L.tileLayer(src+"{z}/{y}/{x}",sharp?{detectRetina:true,maxZoom:21,maxNativeZoom:18,attribution:"Esri"}:{maxZoom:20,maxNativeZoom:19,attribution:"Esri"}).addTo(map);
+  if(S.imagery==="mapbox"&&S.mbToken){
+    // Mapbox Satellite: 512px images drawn at 256, so already sharp on iPhone screens. Your token is kept only on this phone.
+    baseLayer=L.tileLayer("https://api.mapbox.com/v4/mapbox.satellite/{z}/{x}/{y}@2x.jpg90?access_token="+encodeURIComponent(S.mbToken),{maxZoom:21,maxNativeZoom:20,attribution:"Mapbox, Maxar"}).addTo(map);
+  }else{
+    const src=IMG[S.imagery]||IMG.std;
+    baseLayer=L.tileLayer(src+"{z}/{y}/{x}",sharp?{detectRetina:true,maxZoom:21,maxNativeZoom:18,attribution:"Esri"}:{maxZoom:20,maxNativeZoom:19,attribution:"Esri"}).addTo(map);
+  }
   baseLayer.bringToBack();
 }
 setBase();
@@ -779,6 +785,7 @@ async function offlineCount(){
 let offBusy=false;
 async function offlineSave(){
   if(offBusy)return;
+  if(S.imagery==="mapbox"){offOut("Offline saving is only set up for the Esri imagery. Switch Map imagery to Standard or Clarity first.");return}
   if(!("caches" in window)){offOut("This browser cannot store maps offline.");return}
   const t=courseTiles();
   if(!t){offOut("Load the course first: be on it, or long-press the map there to set a test position.");return}
@@ -808,7 +815,7 @@ async function offlineClear(){
 }
 $("offDl").onclick=offlineSave;
 $("offClr").onclick=offlineClear;
-const APP_VERSION="1.4 (14 Nov 2026)";
+const APP_VERSION="1.5 (14 Nov 2026)";
 $("ver").textContent="Tour Caddie v"+APP_VERSION;
 function fillLayClub(){const sel=$("layClub");sel.innerHTML=Object.keys(S.bag).filter(n=>n!=="Driver").map(n=>`<option>${n}</option>`).join("");sel.value=(S.layClub&&S.bag[S.layClub])?S.layClub:(S.bag.PW?"PW":sel.options[0]?sel.options[0].value:"")}
 function drawBag(){
@@ -817,6 +824,7 @@ function drawBag(){
   $("theme").value=S.theme||"auto";
   $("scheme").value=S.scheme||"fairway";
   $("imagery").value=S.imagery||"std";
+  $("mbTok").value=S.mbToken||"";
   $("sharp").value=S.sharp===false?"off":"on";
   drawShots();
   $("boost").value=S.boost;
@@ -838,6 +846,7 @@ function applyTheme(){
 applyTheme();
 $("theme").onchange=e=>{S.theme=e.target.value;save();applyTheme()};
 $("imagery").onchange=e=>{S.imagery=e.target.value;save();setBase()};
+$("mbTok").onchange=e=>{S.mbToken=e.target.value.trim();save();setBase()};
 $("sharp").onchange=e=>{S.sharp=e.target.value==="on";save();setBase()};
 $("scheme").onchange=e=>{S.scheme=e.target.value;save();applyTheme()};
 fillClubSelect();
